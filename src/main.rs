@@ -5,6 +5,7 @@
 //! Layout:
 //!   Pure, dependency-free logic (testable natively with `cargo test`... or plain `rustc --test`):
 //!     math, rng, mesh   - tiny math lib + placeholder mesh builder
+//!     gltf              - .glb model loader (Blender exports) into the mesh vertex format
 //!     data              - content tables (spirits, treats, upgrades) + save format
 //!     env               - day/night + weather
 //!     world             - the areas' layouts
@@ -21,6 +22,7 @@ mod audio;
 mod data;
 mod env;
 mod game;
+mod gltf;
 mod hud;
 mod math;
 mod mesh;

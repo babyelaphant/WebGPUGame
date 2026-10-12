@@ -11,6 +11,18 @@ use std::f32::consts::TAU;
 
 pub const FLOATS_PER_VERTEX: usize = 10;
 
+/// How to move one model part this frame (see `Mesh::add_part`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PartXf {
+    pub rot: [f32; 3],
+    pub scale: [f32; 3],
+    pub offset: [f32; 3],
+}
+
+impl PartXf {
+    pub const IDENT: PartXf = PartXf { rot: [0.0; 3], scale: [1.0; 3], offset: [0.0; 3] };
+}
+
 pub struct Mesh {
     pub data: Vec<f32>,
     pos: Vec3,
@@ -52,6 +64,41 @@ impl Mesh {
     fn xp(&self, p: Vec3) -> Vec3 {
         let s = Vec3::new(p.x * self.scale.x, p.y * self.scale.y, p.z * self.scale.z);
         Vec3::new(s.x * self.cos + s.z * self.sin, s.y, -s.x * self.sin + s.z * self.cos) + self.pos
+    }
+
+    /// Adds a loaded glTF model, moved by the current transform (scale, yaw about Y, position).
+    pub fn add_model(&mut self, model: &crate::gltf::Model) {
+        for v in model.data.chunks_exact(FLOATS_PER_VERTEX) {
+            let p = self.xp(Vec3::new(v[0], v[1], v[2]));
+            let n = Vec3::new(v[3] * self.cos + v[5] * self.sin, v[4], -v[3] * self.sin + v[5] * self.cos);
+            self.data.extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z, v[6], v[7], v[8], v[9]]);
+        }
+    }
+
+    /// Adds one animated part of a model: rotated (about its pivot, in z, then x, then y), scaled about
+    /// the pivot and nudged by `xf`, then moved by the current transform like everything else.
+    pub fn add_part(&mut self, part: &crate::gltf::Part, xf: &PartXf) {
+        let (sx, cx) = xf.rot[0].sin_cos();
+        let (sy, cy) = xf.rot[1].sin_cos();
+        let (sz, cz) = xf.rot[2].sin_cos();
+        let rot = |p: [f32; 3]| -> [f32; 3] {
+            let (x, y) = (p[0] * cz - p[1] * sz, p[0] * sz + p[1] * cz);
+            let (y, z) = (y * cx - p[2] * sx, y * sx + p[2] * cx);
+            [x * cy + z * sy, y, -x * sy + z * cy]
+        };
+        for v in part.data.chunks_exact(FLOATS_PER_VERTEX) {
+            let rel = [(v[0] - part.pivot[0]) * xf.scale[0], (v[1] - part.pivot[1]) * xf.scale[1], (v[2] - part.pivot[2]) * xf.scale[2]];
+            let r = rot(rel);
+            let local = Vec3::new(
+                part.pivot[0] + r[0] + xf.offset[0],
+                part.pivot[1] + r[1] + xf.offset[1],
+                part.pivot[2] + r[2] + xf.offset[2],
+            );
+            let p = self.xp(local);
+            let n = rot([v[3], v[4], v[5]]);
+            let n = Vec3::new(n[0] * self.cos + n[2] * self.sin, n[1], -n[0] * self.sin + n[2] * self.cos);
+            self.data.extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z, v[6], v[7], v[8], v[9]]);
+        }
     }
 
     /// One triangle. The normal is flipped to point away from `center`, so winding never matters.

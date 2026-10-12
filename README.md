@@ -151,6 +151,8 @@ src/
   sketch.rs    the journal's SVG drawings, layered by what you've learned
   settings.rs  player options + their text format (shared with assets/menu.js)
   math.rs, rng.rs, mesh.rs   tiny dependency-free helpers
+  gltf.rs      .glb model loader (Blender exports) into the mesh vertex format
+  tools/       make_player.py, make_spirits.py: build the .glb models without Blender
   gfx.rs       wgpu renderer           (browser only)
   web.rs       canvas/input/loop/save  (browser only)
   shaders/     scene.wgsl (toon + lights + fog), post.wgsl (pixel upscale, rain, fog, vignette)
@@ -192,16 +194,32 @@ part of the game: each weather brings different spirits.
 All models are currently built from primitives in `scene.rs`, which is deliberate: the game is
 playable end to end with no art blockers. Plan:
 
-- **Models:** Blender -> export **glTF binary (.glb)**, low-poly with vertex colors. A small glTF
-  loader (milestone 2) will turn each file into the same vertex format `mesh.rs` already uses, so
-  props swap in one at a time. Free CC0 packs (Kenney, Quaternius) are a good stopgap.
+- **Models:** Blender -> export **glTF binary (.glb)**, low-poly with vertex colors. `src/gltf.rs` is a
+  small dependency-free loader that turns a .glb into the same vertex format `mesh.rs` uses, so props
+  swap in one at a time. The player (`assets/models/player.glb`) is the first one; if a model fails
+  to load, the old primitive version is drawn instead. Free CC0 packs (Kenney, Quaternius) also load.
+- **Making models in Blender:** model with +Z up as usual and face the model toward Blender's **-Y**
+  (the exporter turns that into the game's forward). Feet on the ground at z = 0, about 1.9 m tall for
+  the player. Paint colour as a **Color Attribute** (vertex colors); a material with **Emission** > 0 is drawn
+  self-lit (lantern flames, windows). Export: File > Export > glTF 2.0 > **.glb**, with
+  *Attributes > Vertex Color* (Active) and *Apply Modifiers* on, then drop the file in `assets/models/`.
+  No textures, skins or animations yet.
+- **Without Blender:** `python3 tools/make_player.py` and `python3 tools/make_spirits.py` regenerate the
+  player and the 12 spirit models (`assets/models/spirit_<id>.glb`) from code.
+- **Idle animation:** a model is split into parts (one Blender object / glTF node each, origin = pivot) and the
+  game animates a part by its **name** (`part_xf_opt` in `scene.rs`): `flap_l/_r`, `flaplow_l/_r` (moth wings),
+  `bat_l/_r`, `fin_l/_r`, `twitch_l/_r` (ears, whiskers), `flicker` (flames), `sway`, `sway2_l/_r`, `bob`,
+  `spin` (orbiting lights), `bloom`, `bloom2`, `dripfall0..2`, `tip` (hat), `eyes` (blink), `squish`, `pulse`,
+  `tail`. A part named `body` stays still. Add a rule there to invent a new motion.
 - **2D / UI:** concept sheets for spirits, journal and menu mockups are a good fit for Claude Design;
   the HUD is plain HTML/CSS (`index.html`, `hud.rs`) so mockups translate directly.
 
 ## Roadmap
 
 - [x] Milestone 1: one glade, day/night, clear/fog/rain, 4 spirits, treat lures, lantern puzzle, cottage, 3 upgrades, saves
-- [ ] glTF loader + first Blender props
+- [x] glTF loader + player model
+- [x] 12 spirit models with idle animations
+- [ ] More Blender props (cottage, trees, gravestones)
 - [x] Audio: synthesized cozy soundscape (see below)
 - [x] Second area, gated by an upgrade: Graveyard Hollow, 4 new spirits, a rune-melody puzzle
 - [x] Third area: Willow Pond with water, a shed, 4 spirits and a lily-lamp puzzle

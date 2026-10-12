@@ -706,11 +706,27 @@ fn draw_runes(m: &mut Mesh, game: &Game) {
     }
 }
 
+/// The player model (assets/models/player.glb, built by tools/make_player.py or exported from Blender),
+/// parsed once. `None` means the file was unreadable and the primitive placeholder is drawn instead.
+fn player_model() -> Option<&'static crate::gltf::Model> {
+    static MODEL: std::sync::OnceLock<Option<crate::gltf::Model>> = std::sync::OnceLock::new();
+    MODEL.get_or_init(|| crate::gltf::parse_glb(include_bytes!("../assets/models/player.glb")).ok()).as_ref()
+}
+
 fn draw_player(m: &mut Mesh, game: &Game) {
     let p = &game.player;
     let bob = if p.moving { p.walk_phase.sin().abs() * 0.07 } else { (game.time * 2.0).sin() * 0.012 };
     shadow(m, p.pos, 0.55);
     m.set_xf_u(p.pos + v(0.0, bob, 0.0), p.facing, 1.2);
+    if let Some(model) = player_model() {
+        m.add_model(model);
+        m.reset_xf();
+        return;
+    }
+    draw_player_placeholder(m);
+}
+
+fn draw_player_placeholder(m: &mut Mesh) {
     let hood = [0.24, 0.12, 0.40];
     m.cone(V0, 0.58, 1.15, 8, [0.36, 0.20, 0.54], 0.0); // cloak
     m.ellipsoid(v(0.0, 1.28, 0.05), v(0.27, 0.27, 0.27), 3, 6, [0.86, 0.72, 0.62], 0.0); // face
@@ -724,12 +740,115 @@ fn draw_player(m: &mut Mesh, game: &Game) {
     m.reset_xf();
 }
 
+/// The 12 spirit models (assets/models/spirit_<id>.glb, built by tools/make_spirits.py or exported from
+/// Blender), parsed once, in the same order as `SPIRITS`. A missing or broken file falls back to the
+/// primitive placeholder below.
+fn spirit_model(def: usize) -> Option<&'static crate::gltf::Model> {
+    static MODELS: std::sync::OnceLock<Vec<Option<crate::gltf::Model>>> = std::sync::OnceLock::new();
+    let all = MODELS.get_or_init(|| {
+        let files: [(&str, &[u8]); 12] = [
+            ("pip", include_bytes!("../assets/models/spirit_pip.glb")),
+            ("mizzle", include_bytes!("../assets/models/spirit_mizzle.glb")),
+            ("hush", include_bytes!("../assets/models/spirit_hush.glb")),
+            ("luna", include_bytes!("../assets/models/spirit_luna.glb")),
+            ("wick", include_bytes!("../assets/models/spirit_wick.glb")),
+            ("drip", include_bytes!("../assets/models/spirit_drip.glb")),
+            ("gloam", include_bytes!("../assets/models/spirit_gloam.glb")),
+            ("marrow", include_bytes!("../assets/models/spirit_marrow.glb")),
+            ("bobbin", include_bytes!("../assets/models/spirit_bobbin.glb")),
+            ("pondle", include_bytes!("../assets/models/spirit_pondle.glb")),
+            ("reed", include_bytes!("../assets/models/spirit_reed.glb")),
+            ("lotus", include_bytes!("../assets/models/spirit_lotus.glb")),
+        ];
+        SPIRITS
+            .iter()
+            .map(|d| files.iter().find(|(id, _)| *id == d.id).and_then(|(_, b)| crate::gltf::parse_glb(b).ok()))
+            .collect()
+    });
+    all.get(def).and_then(|m| m.as_ref())
+}
+
+/// Idle animation, chosen by a part's name (the node name in the .glb): `flap_l` wings, `flicker` flames,
+/// `bob` floating bits, `eyes` blink... `phase` is the spirit's own clock (about 2.4 per second), so
+/// every spirit moves out of step. Returns `None` for parts that stay still (`body`).
+fn part_xf_opt(name: &str, phase: f32) -> Option<PartXf> {
+    let (base, side) = match name.rsplit_once('_') {
+        Some((b, "l")) => (b, -1.0f32),
+        Some((b, "r")) => (b, 1.0),
+        _ => (name, 1.0),
+    };
+    let digit = base.chars().last().and_then(|c| c.to_digit(10)).unwrap_or(0) as f32;
+    let base = base.trim_end_matches(|c: char| c.is_ascii_digit());
+    let mut x = PartXf::IDENT;
+    match base {
+        "flap" => x.rot[2] = side * (0.15 + 0.45 * (phase * 3.0).sin()),
+        "flaplow" => x.rot[2] = side * (0.1 + 0.35 * (phase * 3.0 + 0.8).sin()),
+        "bat" => x.rot[2] = side * (0.12 + 0.35 * (phase * 2.2).sin()),
+        "fin" => x.rot[2] = side * 0.22 * (phase * 1.6).sin(),
+        "twitch" => x.rot[2] = side * 0.14 * (phase * 4.0 + side).sin() * (phase * 0.6).sin().max(0.0).sqrt(),
+        "flicker" => {
+            x.scale = [1.0 - 0.06 * (phase * 4.7).sin(), 1.0 + 0.15 * (phase * 4.0).sin() + 0.07 * (phase * 9.3).sin(), 1.0 - 0.06 * (phase * 4.7).sin()];
+        }
+        "sway" => {
+            x.rot[2] = 0.10 * (phase * 1.3).sin();
+            x.rot[0] = 0.06 * (phase * 1.1).sin();
+        }
+        "sway2" => x.rot[2] = side * (0.05 + 0.1 * (phase * 1.7 + 1.0).sin()),
+        "bob" => x.offset[1] = 0.07 * (phase * 1.8).sin(),
+        "spin" => x.rot[1] = phase * 0.5,
+        "bloom" | "bloom2" => {
+            let s = (phase * 1.4 + if base == "bloom2" { 1.2 } else { 0.0 }).sin();
+            x.scale = [1.0 + 0.1 * s, 1.0 - 0.06 * s, 1.0 + 0.1 * s];
+        }
+        "dripfall" => {
+            let f = (phase * 0.22 + digit * 0.37).fract();
+            x.offset[1] = -f * 0.7;
+            let k = 1.0 - f * f * 0.8;
+            x.scale = [k, k, k];
+        }
+        "tip" => {
+            let k = (phase * 0.55).sin().max(0.0).powi(6);
+            x.rot[2] = k * 0.35;
+            x.offset[1] = k * 0.12;
+        }
+        "eyes" => {
+            // A quick blink every few seconds.
+            if (phase * 0.5) % TAU > TAU - 0.35 {
+                x.scale[1] = 0.12;
+            }
+        }
+        "squish" => {
+            let s = (phase * 3.0).sin();
+            x.scale = [1.0 - 0.03 * s, 1.0 + 0.05 * s, 1.0 - 0.03 * s];
+        }
+        "pulse" => {
+            let k = 1.0 + 0.2 * (phase * 0.9).sin().max(0.0).powi(3);
+            x.scale = [k, k, k];
+        }
+        "tail" => x.rot[1] = 0.35 * (phase * 3.0).sin(),
+        _ => return None,
+    }
+    Some(x)
+}
+
+fn part_xf(name: &str, phase: f32) -> PartXf {
+    part_xf_opt(name, phase).unwrap_or(PartXf::IDENT)
+}
+
 /// One spirit. `pos` is its spot on the ground; it hovers above it. `appear` is 0..1 scale.
 fn draw_spirit(m: &mut Mesh, def: usize, pos: Vec3, yaw: f32, appear: f32, phase: f32, _mood: f32) {
     let d = &SPIRITS[def];
     let s = d.size * 1.25 * appear.max(0.001);
     let hover = 0.85 * d.size / 0.55 + 0.12 * phase.sin();
     m.set_xf_u(pos + v(0.0, hover * appear, 0.0), yaw, s);
+
+    if let Some(model) = spirit_model(def) {
+        for part in &model.parts {
+            m.add_part(part, &part_xf(&part.name, phase));
+        }
+        m.reset_xf();
+        return;
+    }
 
     let c = d.color;
     m.ellipsoid(v(0.0, 0.4, 0.0), v(0.9, 1.0, 0.9), 5, 8, c, 0.55);
@@ -830,6 +949,48 @@ fn draw_spirit(m: &mut Mesh, def: usize, pos: Vec3, yaw: f32, appear: f32, phase
 mod tests {
     use super::*;
     use crate::data::Save;
+
+    #[test]
+    fn every_spirit_has_a_model_with_idle_animation() {
+        for (i, d) in SPIRITS.iter().enumerate() {
+            let model = spirit_model(i).unwrap_or_else(|| panic!("{} should load", d.id));
+            assert!(model.vertex_count() > 150, "{} looks empty", d.id);
+            let names: Vec<&str> = model.parts.iter().map(|p| p.name.as_str()).collect();
+            assert!(names.contains(&"eyes"), "{} needs eyes", d.id);
+            let moving: Vec<&&str> = names.iter().filter(|n| part_xf_opt(n, 1.3).is_some()).collect();
+            assert!(moving.len() >= 2, "{} should have an idle animation, parts: {:?}", d.id, names);
+            for n in &names {
+                assert!(*n == "body" || part_xf_opt(n, 1.3).is_some(), "{}: part '{}' has no animation rule", d.id, n);
+            }
+            // Every model sits around the same frame the placeholder used (bottom near -0.95, top under 3).
+            let ys: Vec<f32> = model.data.chunks(FLOATS_PER_VERTEX).map(|v| v[1]).collect();
+            let (lo, hi) = (ys.iter().cloned().fold(f32::MAX, f32::min), ys.iter().cloned().fold(f32::MIN, f32::max));
+            assert!(lo > -1.4 && lo < -0.6, "{} bottom {}", d.id, lo);
+            assert!(hi > 1.0 && hi < 3.2, "{} top {}", d.id, hi);
+        }
+    }
+
+    #[test]
+    fn animation_moves_parts_and_keeps_models_whole() {
+        // Wings mirror each other and actually move over time.
+        let (l, r) = (part_xf("flap_l", 0.5), part_xf("flap_r", 0.5));
+        assert!((l.rot[2] + r.rot[2]).abs() < 1e-6 && r.rot[2] != 0.0);
+        assert_ne!(part_xf("flap_r", 0.5), part_xf("flap_r", 1.0));
+        // Raindrops cycle: they start at the top and shrink as they fall.
+        assert!(part_xf("dripfall1", 0.0).offset[1] < 0.0 || part_xf("dripfall1", 0.0).scale[0] <= 1.0);
+        // Animated draw adds exactly the same number of vertices as the static model.
+        let model = spirit_model(2).unwrap();
+        let mut m = Mesh::new();
+        for part in &model.parts {
+            m.add_part(part, &part_xf(&part.name, 3.0));
+        }
+        assert_eq!(m.vertex_count(), model.vertex_count());
+        assert!(m.data.iter().all(|f| f.is_finite()));
+        // Normals stay unit length after rotating.
+        for v in m.data.chunks(FLOATS_PER_VERTEX) {
+            assert!((v[3] * v[3] + v[4] * v[4] + v[5] * v[5] - 1.0).abs() < 1e-2);
+        }
+    }
 
     #[test]
     fn globals_and_post_have_expected_size() {
@@ -934,6 +1095,9 @@ mod tests {
                 g.enter_area(Area::Pond);
                 g.player.pos = v(-4.0, 0.0, 22.0);
             })),
+            ("glade_lineup", 12.0, Weather::Clear, Box::new(|g: &mut Game| {
+                g.player.pos = v(2.0, 0.0, 14.0);
+            })),
             ("pond_gate", 12.0, Weather::Clear, Box::new(|g: &mut Game| {
                 g.save.upgrades[POND_KEY] = 1;
                 g.player.pos = g.world.gate_to(Area::Pond).pos + v(1.5, 0.0, -7.0);
@@ -970,6 +1134,15 @@ mod tests {
             if name == "pond_lineup" {
                 g.spirits.clear();
                 for (i, d) in (8..N_SPIRITS).enumerate() {
+                    let id = g.spawn_spirit(d, g.player.pos + v(-4.5 + i as f32 * 3.0, 0.0, -4.0));
+                    let sp = g.spirits.iter_mut().find(|s| s.id == id).unwrap();
+                    sp.fade = 1.0;
+                    sp.yaw = 0.0;
+                }
+            }
+            if name == "glade_lineup" {
+                g.spirits.clear();
+                for (i, d) in (0..4).enumerate() {
                     let id = g.spawn_spirit(d, g.player.pos + v(-4.5 + i as f32 * 3.0, 0.0, -4.0));
                     let sp = g.spirits.iter_mut().find(|s| s.id == id).unwrap();
                     sp.fade = 1.0;
