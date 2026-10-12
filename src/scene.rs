@@ -659,7 +659,7 @@ pub fn build_dynamic(game: &Game, m: &mut Mesh) {
     }
 
     // Befriending sparkles.
-    for b in &game.bursts {
+    for b in game.bursts.iter().filter(|b| b.age >= 0.0) {
         let life = (1.0 - b.age / 1.4).max(0.0);
         for k in 0..8 {
             let a = TAU * k as f32 / 8.0 + b.age;

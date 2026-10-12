@@ -30,6 +30,7 @@ pub fn build(g: &Game) -> Vec<(&'static str, String)> {
         ("hud-hotbar", hotbar(g)),
         ("hud-shop", shop(g)),
         ("hud-journal", if g.show_journal { journal(g) } else { String::new() }),
+        ("hud-ending", ending(g)),
         ("hud-debug", if g.show_debug { debug(g) } else { String::new() }),
     ]
 }
@@ -140,7 +141,9 @@ fn shop(g: &Game) -> String {
 /// "7/60" and a nudge when there is something new to read.
 fn book_badge(g: &Game) -> String {
     let (got, all) = g.save.journal_progress();
-    if g.journal_unread > 0 && !g.show_journal {
+    if g.save.journal_complete() {
+        format!("★ {got}/{all} complete")
+    } else if g.journal_unread > 0 && !g.show_journal {
         format!("<span class=\"newnote\">📖 {got}/{all} · new note! <kbd>J</kbd></span>")
     } else {
         format!("📖 {got}/{all}")
@@ -263,10 +266,33 @@ fn journal(g: &Game) -> String {
             cards.push_str(&card(g, i));
         }
     }
+    let replay = if g.save.journal_complete() { "<kbd>Enter</kbd> replay the ending · " } else { "" };
     format!(
         "<div class=\"book-head\"><h3>Spirit journal</h3><span class=\"prog\">{got} / {all} notes</span>\
-         <span class=\"keys\"><kbd>A</kbd> <kbd>D</kbd> turn the page · <kbd>J</kbd> close</span></div>\
+         <span class=\"keys\"><kbd>A</kbd> <kbd>D</kbd> turn the page · {replay}<kbd>J</kbd> close</span></div>\
          <div class=\"tabs\">{tabs}</div><div class=\"cards\">{cards}</div>"
+    )
+}
+
+fn ending(g: &Game) -> String {
+    let Some(e) = &g.ending else { return String::new() };
+    let names: String = SPIRITS
+        .iter()
+        .map(|d| format!("<span class=\"f\">{} {}</span>", dot(d.color), d.name.split(',').next().unwrap_or(d.name)))
+        .collect();
+    let (title, body) = match e.page {
+        0 => ("The journal is full", format!("Every spirit of the Hollow has found its way home.<div class=\"roll\">{names}</div>")),
+        1 => ("A garden full of lights", "Pumpkin Pip chases moths past the cottage. Hush hums at the gate. Marrow keeps one quiet watch from the old stone, and the pond glows like a window.".to_string()),
+        2 => ("The Hollow remembers", "Nobody in the village will ever believe it. But on cold nights the candles lean toward your door, and something small is always waiting inside.".to_string()),
+        _ => ("Thank you for playing", "Your save is safe. Wander, befriend more spirits and keep the garden growing as long as you like.".to_string()),
+    };
+    let last = e.page + 1 >= ENDING_PAGES;
+    let hint = if last { "<kbd>E</kbd> keep playing" } else { "<kbd>E</kbd> continue" };
+    format!(
+        "<div class=\"end-card\"><div class=\"end-star\">★</div><h2>{title}</h2><div class=\"end-body\">{body}</div>\
+         <div class=\"end-pages\">{}/{}</div><div class=\"end-hint\">{hint}</div></div>",
+        e.page + 1,
+        ENDING_PAGES
     )
 }
 
@@ -289,6 +315,25 @@ fn debug(g: &Game) -> String {
 mod tests {
     use super::*;
     use crate::math::Vec3;
+
+    #[test]
+    fn ending_overlay_builds_for_every_page() {
+        let mut g = Game::new(Save::default(), 1);
+        assert!(ending(&g).is_empty());
+        for page in 0..ENDING_PAGES {
+            g.ending = Some(Ending { page, age: 1.0 });
+            let h = ending(&g);
+            assert!(h.contains("end-card") && h.contains(&format!("{}/{}", page + 1, ENDING_PAGES)));
+            if let Ok(dir) = std::env::var("DUMP_ENDING") {
+                std::fs::write(format!("{dir}/end{page}.html"), &h).unwrap();
+            }
+        }
+        g.save.discovered = [true; N_SPIRITS];
+        g.save.seen = [true; N_SPIRITS];
+        assert!(book_badge(&g).contains("complete"));
+        g.show_journal = true;
+        assert!(journal(&g).contains("replay the ending"));
+    }
 
     #[test]
     fn hud_builds_for_every_panel_state() {

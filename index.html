@@ -105,6 +105,16 @@
     body.no-hints #hud-help { display: none; }
 
     #hud-debug { position: absolute; bottom: 30px; right: 28px; font: 16px/1.3 ui-monospace, monospace; white-space: pre; }
+    #hud-ending { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(12,8,24,.78); animation: endfade 1.2s ease-out; z-index: 20; }
+    #hud-ending:empty { display: none; }
+    @keyframes endfade { from { opacity: 0; } to { opacity: 1; } }
+    .end-card { background: var(--panel); box-shadow: var(--dbl); padding: 34px 44px 26px; width: min(640px, 80vw); text-align: center; }
+    .end-star { color: var(--gold); font: 400 28px var(--font-head); margin-bottom: 14px; }
+    .end-card h2 { margin: 0 0 16px; font: 400 18px/1.5 var(--font-head); color: var(--gold); }
+    .end-body { font-size: 26px; line-height: 1.2; }
+    .end-body .roll { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 18px; margin-top: 16px; font-size: 22px; }
+    .end-pages { color: var(--ink-dim); font-size: 20px; margin-top: 20px; }
+    .end-hint { color: var(--gold); font-size: 22px; margin-top: 4px; }
     #hud-help { position: absolute; right: 28px; bottom: 30px; color: var(--ink-dim); font-size: 19px; text-align: right; opacity: .85; max-width: 340px; line-height: 1.2; }
 
     #error {
@@ -129,6 +139,7 @@
     <div class="panel" id="hud-hotbar"></div>
     <div class="panel" id="hud-shop"></div>
     <div class="panel" id="hud-journal"></div>
+    <div id="hud-ending"></div>
     <div class="panel" id="hud-debug"></div>
     <div id="hud-help">WASD move · Shift run · E interact · Space drop treat · Q / R switch treat · J journal · M sound · Esc menu · F1 debug</div>
   </div>

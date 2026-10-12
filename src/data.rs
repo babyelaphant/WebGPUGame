@@ -392,6 +392,8 @@ pub struct Save {
     pub discovered: [bool; N_SPIRITS],
     /// Journal clues learned by watching (bits: 1 habits, 2 likes, 4 when).
     pub clues: [u8; N_SPIRITS],
+    /// The journal was completed and the ending has played (play carries on afterwards).
+    pub ending: bool,
 }
 
 impl Default for Save {
@@ -404,6 +406,7 @@ impl Default for Save {
             seen: [false; N_SPIRITS],
             discovered: [false; N_SPIRITS],
             clues: [0; N_SPIRITS],
+            ending: false,
         }
     }
 }
@@ -424,14 +427,15 @@ impl Save {
     pub fn serialize(&self) -> String {
         let b = |v: &[bool]| join(&v.iter().map(|x| *x as u8).collect::<Vec<_>>());
         format!(
-            "v1\ncandles={}\nupgrades={}\ntreats={}\nresidents={}\nseen={}\ndiscovered={}\nclues={}\n",
+            "v1\ncandles={}\nupgrades={}\ntreats={}\nresidents={}\nseen={}\ndiscovered={}\nclues={}\nending={}\n",
             self.candles,
             join(&self.upgrades),
             join(&self.treats),
             join(&self.residents),
             b(&self.seen),
             b(&self.discovered),
-            join(&self.clues)
+            join(&self.clues),
+            self.ending as u8
         )
     }
 
@@ -467,6 +471,12 @@ impl Save {
         ((0..N_SPIRITS).map(|i| self.pages(i)).sum(), N_SPIRITS * N_CLUES)
     }
 
+    /// Every note written: all 12 spirits have been brought home.
+    pub fn journal_complete(&self) -> bool {
+        let (got, all) = self.journal_progress();
+        got == all
+    }
+
     /// Tolerant parser: unknown/missing/garbled fields fall back to defaults.
     pub fn parse(text: &str) -> Save {
         let mut s = Save::default();
@@ -478,6 +488,7 @@ impl Save {
                 "treats" => parse_list(v, &mut s.treats),
                 "residents" => parse_list(v, &mut s.residents),
                 "clues" => parse_list(v, &mut s.clues),
+                "ending" => s.ending = v.trim() == "1",
                 "seen" | "discovered" => {
                     let mut raw = [0u8; N_SPIRITS];
                     parse_list(v, &mut raw);
@@ -518,6 +529,7 @@ mod tests {
         s.seen = [true, true, false, true, true, false, false, true, true, false, false, true];
         s.discovered = [false, true, false, true, true, false, false, true, false, false, false, true];
         s.clues = [1, 0, 7, 2, 0, 4, 0, 0, 1, 0, 0, 0];
+        s.ending = true;
         assert_eq!(Save::parse(&s.serialize()), s);
         let g = Save::parse("lol\ncandles=abc\nupgrades=9,9,9,9,9\n===\n");
         assert_eq!(g.candles, 0);

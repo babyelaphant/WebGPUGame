@@ -65,7 +65,8 @@ fn write_save(save: &Save) {
 /// A one-line summary of a save for the title screen's Continue button.
 fn save_summary(save: &Save) -> String {
     let friends: u32 = save.residents.iter().sum();
-    format!("🕯️ {} · {} friend{}", save.candles, friends, if friends == 1 { "" } else { "s" })
+    let star = if save.ending { " · ★ journal complete" } else { "" };
+    format!("🕯️ {} · {} friend{}{}", save.candles, friends, if friends == 1 { "" } else { "s" }, star)
 }
 
 fn new_seed() -> u64 {
@@ -107,6 +108,7 @@ fn map_journal_key(code: &str) -> Option<Action> {
     Some(match code {
         "ArrowLeft" | "KeyA" | "KeyQ" => Action::JournalPage(-1),
         "ArrowRight" | "KeyD" | "KeyE" => Action::JournalPage(1),
+        "Enter" => Action::ReplayEnding,
         _ => return None,
     })
 }
@@ -372,7 +374,7 @@ async fn run() -> Result<(), String> {
                     game.act(a);
                 }
             }
-            if game.show_journal {
+            if game.show_journal || game.ending.is_some() {
                 ctl = Controls::default(); // reading, not walking
             }
             if game.settings.run_toggle {

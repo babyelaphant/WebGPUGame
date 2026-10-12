@@ -76,6 +76,8 @@ pub enum Action {
     ToggleDebug,
     CycleWeather,
     HourShift(f32),
+    /// Journal open and complete: watch the ending again.
+    ReplayEnding,
 }
 
 /// Continuous input, sampled every fixed step.
@@ -200,6 +202,14 @@ pub struct Toast {
     pub ttl: f32,
 }
 
+/// The ending sequence: a few pages over the world while you stand at the cottage.
+pub struct Ending {
+    pub page: usize,
+    pub age: f32,
+}
+
+pub const ENDING_PAGES: usize = 4;
+
 pub struct Burst {
     pub pos: Vec3,
     pub age: f32,
@@ -233,6 +243,10 @@ pub struct Game {
     /// Journal notes written since the journal was last opened.
     pub journal_unread: u32,
     pub show_debug: bool,
+    /// Some while the ending is on screen.
+    pub ending: Option<Ending>,
+    /// Seconds until the ending starts (lets the last 'new friend' toast land first).
+    pub ending_wait: Option<f32>,
     pub settings: Settings,
     pub sense: Option<Sense>,
     /// Set when `save` changed; the web layer persists it.
@@ -285,6 +299,8 @@ impl Game {
             journal_page: 0,
             journal_unread: 0,
             show_debug: false,
+            ending: None,
+            ending_wait: None,
             settings: Settings::default(),
             sense: None,
             dirty: false,
@@ -386,6 +402,13 @@ impl Game {
     // ---------------------------------------------------------------- discrete actions
 
     pub fn act(&mut self, a: Action) {
+        if self.ending.is_some() {
+            // Only 'continue' keys do anything while the ending is up.
+            if matches!(a, Action::Interact | Action::DropTreat) {
+                self.advance_ending();
+            }
+            return;
+        }
         match a {
             Action::Interact => self.interact(),
             Action::DropTreat => self.drop_treat(),
@@ -417,6 +440,61 @@ impl Game {
                 self.env.set_weather(w);
             }
             Action::HourShift(h) => self.env.hour = (self.env.hour + h).rem_euclid(24.0),
+            Action::ReplayEnding => {
+                if self.show_journal && self.save.journal_complete() {
+                    self.show_journal = false;
+                    self.start_ending();
+                }
+            }
+        }
+    }
+
+    fn start_ending(&mut self) {
+        self.ending = Some(Ending { page: 0, age: 0.0 });
+        self.ending_wait = None;
+        if !self.save.ending {
+            self.save.ending = true;
+            self.dirty = true;
+        }
+        self.play(Sfx::Buy);
+        let home = self.world.home;
+        for (i, d) in SPIRITS.iter().enumerate() {
+            let a = i as f32 / SPIRITS.len() as f32 * TAU;
+            let pos = Vec3::new(home.x + a.cos() * 3.0, 0.0, home.z + 2.0 + a.sin() * 3.0);
+            self.bursts.push(Burst { pos, age: -(i as f32) * 0.12, color: d.color });
+        }
+    }
+
+    fn advance_ending(&mut self) {
+        let Some(e) = &mut self.ending else { return };
+        if e.age < 0.6 {
+            return; // don't let a held key skip the page
+        }
+        e.page += 1;
+        e.age = 0.0;
+        if e.page >= ENDING_PAGES {
+            self.ending = None;
+            self.toast("The journal is full. The garden is yours to keep tending.");
+            self.play(Sfx::Ui);
+        } else {
+            self.play(Sfx::Ui);
+        }
+    }
+
+    fn update_ending(&mut self, dt: f32) {
+        if let Some(e) = &mut self.ending {
+            e.age += dt;
+            return;
+        }
+        if self.travel.is_some() || self.save.ending || !self.save.journal_complete() {
+            self.ending_wait = None;
+            return;
+        }
+        let w = self.ending_wait.get_or_insert(2.5);
+        *w -= dt;
+        if *w <= 0.0 {
+            self.show_journal = false;
+            self.start_ending();
         }
     }
 
@@ -680,7 +758,7 @@ impl Game {
     pub fn update(&mut self, dt: f32, ctl: &Controls) {
         self.time += dt;
         let walking = Controls::default();
-        let ctl = if self.travel.is_some() { &walking } else { ctl };
+        let ctl = if self.travel.is_some() || self.ending.is_some() { &walking } else { ctl };
 
         if self.env.update(dt, &mut self.rng) {
             // Dawn: the lanterns burn out, the crypt picks a new tune, the lily lamps get scrambled.
@@ -703,6 +781,7 @@ impl Game {
         self.update_drops(dt);
         self.update_sources(dt);
         self.update_deposit(dt);
+        self.update_ending(dt);
 
         // Smooth camera with a little look-ahead.
         let want = self.player.pos + self.player.vel * 0.35;
@@ -1343,6 +1422,93 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn full_journal_game() -> Game {
+        let mut save = Save::default();
+        save.discovered = [true; N_SPIRITS];
+        save.seen = [true; N_SPIRITS];
+        Game::new(save, 3)
+    }
+
+    #[test]
+    fn full_journal_starts_the_ending_once_and_play_continues() {
+        let ctl = Controls::default();
+        let mut g = full_journal_game();
+        assert!(g.save.journal_complete() && !g.save.ending);
+        for _ in 0..200 {
+            g.update(0.02, &ctl);
+        }
+        assert!(g.ending.is_some(), "ending should start after a short wait");
+        assert!(g.save.ending && g.dirty);
+        // Controls and other actions are ignored while it plays.
+        g.act(Action::ToggleJournal);
+        assert!(!g.show_journal);
+        // Walk through every page.
+        for page in 0..ENDING_PAGES {
+            assert_eq!(g.ending.as_ref().unwrap().page, page);
+            for _ in 0..40 {
+                g.update(0.02, &ctl);
+            }
+            g.act(Action::Interact);
+            if page + 1 < ENDING_PAGES {
+                assert_eq!(g.ending.as_ref().unwrap().page, page + 1);
+                g.act(Action::Interact); // straight away: ignored
+                assert_eq!(g.ending.as_ref().unwrap().page, page + 1, "too early to skip");
+            }
+        }
+        assert!(g.ending.is_none());
+        // Same save keeps going and never retriggers.
+        for _ in 0..400 {
+            g.update(0.02, &ctl);
+        }
+        assert!(g.ending.is_none());
+        g.act(Action::ToggleJournal);
+        assert!(g.show_journal);
+    }
+
+    #[test]
+    fn loaded_save_with_ending_seen_does_not_replay_but_can_be_replayed() {
+        let ctl = Controls::default();
+        let mut g = full_journal_game();
+        g.save.ending = true;
+        for _ in 0..300 {
+            g.update(0.02, &ctl);
+        }
+        assert!(g.ending.is_none());
+        g.act(Action::ReplayEnding); // journal closed: nothing
+        assert!(g.ending.is_none());
+        g.act(Action::ToggleJournal);
+        g.act(Action::ReplayEnding);
+        assert!(g.ending.is_some() && !g.show_journal);
+    }
+
+    #[test]
+    fn incomplete_journal_never_ends_or_replays() {
+        let ctl = Controls::default();
+        let mut g = Game::new(Save::default(), 3);
+        for _ in 0..300 {
+            g.update(0.02, &ctl);
+        }
+        g.act(Action::ToggleJournal);
+        g.act(Action::ReplayEnding);
+        assert!(g.ending.is_none() && !g.save.ending);
+    }
+
+    #[test]
+    fn last_deposit_completes_the_journal_and_triggers_ending() {
+        let mut save = Save::default();
+        save.discovered = [true; N_SPIRITS];
+        save.discovered[0] = false;
+        save.seen = [true; N_SPIRITS];
+        let mut g = Game::new(save, 3);
+        assert!(!g.save.journal_complete());
+        g.save.learn(0, Clue::Friend);
+        let ctl = Controls::default();
+        for _ in 0..200 {
+            g.update(0.02, &ctl);
+        }
+        assert!(g.ending.is_some());
+    }
 
     fn run(g: &mut Game, seconds: f32, ctl: &Controls) {
         for _ in 0..(seconds / STEP) as usize {

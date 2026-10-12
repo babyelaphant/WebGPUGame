@@ -120,6 +120,14 @@ about it**. There are five notes per spirit (60 in all), and you learn them by p
 A new note plays a pencil scratch and a toast, and the clock bar shows "new note!" until you open the book.
 Befriending a spirit teaches you all of it at once. Unfound spirits are dashed "?" boxes.
 
+### The ending
+
+Fill all 60 notes (which means every one of the 12 spirits has been brought home at least once) and a few seconds
+after the last friend moves in, a short ending plays over the garden: four pages, <kbd>E</kbd> to continue. It
+doesn't end the game. The last page says "keep playing" and you carry on with the same save. It plays once
+(stored as `ending=1` in the save); with the journal open and complete, <kbd>Enter</kbd> replays it. The HUD shows
+"★ complete" and the title screen's save summary gets a star.
+
 ## Title screen and settings
 
 The title screen ("untitled-01" for now: change `GAME_NAME` in `assets/menu.js`) shows the glade at golden hour with
@@ -229,5 +237,6 @@ playable end to end with no art blockers. Plan:
 - [x] Finding spirits: nearby shimmer + compass hint
 - [x] Journal that fills in with sketches as you learn about each spirit
 - [x] Title screen + settings menu
+- [x] Ending when the journal is full (play continues on the same save)
 - [ ] More spirits
 - [ ] Key rebinding, gamepad support
