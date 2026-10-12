@@ -1,0 +1,5 @@
+# wgpu's WebGPU backend uses web-sys APIs that are still flagged "unstable".
+# NOTE: if you set the RUSTFLAGS environment variable yourself, Cargo ignores this file,
+# so include --cfg=web_sys_unstable_apis in it too.
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg=web_sys_unstable_apis"]

@@ -1,0 +1,25 @@
+[package]
+name = "spirit-collector"
+version = "0.1.0"
+edition = "2021"
+description = "A cozy Halloween spirit-collecting game. Rust + wgpu (WebGPU) compiled to WASM."
+
+# The game logic (math, env, world, game, hud, scene) has NO dependencies on purpose,
+# so it can be compiled and unit-tested natively. Only the browser glue needs crates.
+[dependencies]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { version = "24", default-features = false, features = ["wgsl", "webgpu"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+bytemuck = "1"
+web-sys = { version = "0.3", features = [
+    "Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement",
+    "KeyboardEvent", "Event", "EventTarget", "Storage", "Navigator", "console",
+] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

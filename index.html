@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Spirit Collector</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link data-trunk rel="rust" data-wasm-opt="z" />
+  <link data-trunk rel="copy-dir" href="assets" />
+  <style>
+    :root {
+      --ink: #f4ead8;
+      --ink-dim: #bfae98;
+      --panel: rgba(24, 14, 38, 0.72);
+      --panel-edge: rgba(255, 190, 110, 0.35);
+      --accent: #ffb454;
+      --accent-2: #b48cff;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0614; }
+    body { font-family: "Fredoka", system-ui, sans-serif; color: var(--ink); user-select: none; }
+    canvas#gpu { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; image-rendering: pixelated; }
+
+    #hud { position: fixed; inset: 0; pointer-events: none; font-size: 15px; }
+    .panel {
+      background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 14px;
+      padding: 10px 14px; backdrop-filter: blur(6px); box-shadow: 0 6px 24px rgba(0,0,0,.35);
+    }
+    .panel:empty { display: none; }
+
+    .fc { color: #ffd9a0; animation: pulse 1.6s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: .45; } }
+    #hud-top { position: absolute; top: 16px; left: 16px; display: flex; gap: 10px; align-items: stretch; }
+    #hud-clock b { font-size: 22px; color: var(--accent); margin-right: 6px; }
+    #hud-candles { font-size: 20px; font-weight: 600; }
+
+    #hud-followers { position: absolute; top: 16px; right: 16px; text-align: right; }
+    #hud-followers .f { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; }
+    .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
+
+    #hud-toasts { position: absolute; top: 84px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; }
+    #hud-toasts div { background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 999px; padding: 6px 16px; }
+
+    #hud-prompt { position: absolute; bottom: 112px; left: 50%; transform: translateX(-50%); text-align: center; max-width: 520px; }
+    #hud-prompt small { color: var(--ink-dim); }
+
+    #hud-hotbar { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; padding: 8px; }
+    .slot { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; border: 2px solid transparent; background: rgba(255,255,255,.05); }
+    .slot.sel { border-color: var(--accent); background: rgba(255,180,84,.14); }
+    .slot i { width: 16px; height: 16px; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px currentColor; }
+    .slot b { margin-left: 4px; color: var(--accent); }
+
+    #hud-shop { position: absolute; left: 16px; bottom: 16px; width: 330px; }
+    #hud-shop h3, #hud-journal h3 { margin: 0 0 6px; font-weight: 600; color: var(--accent); }
+    .up { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: baseline; padding: 4px 0; }
+    .up small { display: block; color: var(--ink-dim); }
+    kbd { background: rgba(255,255,255,.12); border-radius: 6px; padding: 1px 7px; font-family: inherit; }
+
+    #hud-journal { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 560px; max-height: 70vh; overflow: auto; }
+    #hud-journal .entry { padding: 8px 0; border-top: 1px solid rgba(255,255,255,.08); }
+    #hud-journal .entry small { color: var(--ink-dim); display: block; }
+
+    #hud-debug { position: absolute; bottom: 16px; right: 16px; font: 12px/1.4 ui-monospace, monospace; white-space: pre; }
+    #hud-help { position: absolute; right: 16px; bottom: 16px; color: var(--ink-dim); font-size: 12px; text-align: right; opacity: .75; }
+
+    #error {
+      display: none; position: fixed; inset: 0; z-index: 10; padding: 15vh 10vw; text-align: center;
+      background: #120a1f; color: var(--ink); font-size: 20px; line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gpu"></canvas>
+  <div id="hud">
+    <div id="hud-top">
+      <div class="panel" id="hud-clock"></div>
+      <div class="panel" id="hud-candles"></div>
+    </div>
+    <div class="panel" id="hud-followers"></div>
+    <div id="hud-toasts"></div>
+    <div class="panel" id="hud-prompt"></div>
+    <div class="panel" id="hud-hotbar"></div>
+    <div class="panel" id="hud-shop"></div>
+    <div class="panel" id="hud-journal"></div>
+    <div class="panel" id="hud-debug"></div>
+    <div id="hud-help">WASD move · Shift run · E interact · Space drop treat · Q / R switch treat · J journal · M sound · F1 debug</div>
+  </div>
+  <div id="error"></div>
+  <script src="assets/audio.js"></script>
+</body>
+</html>
