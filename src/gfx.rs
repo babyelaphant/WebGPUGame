@@ -10,8 +10,8 @@ use crate::mesh::FLOATS_PER_VERTEX;
 use crate::scene::{GLOBALS_FLOATS, POST_FLOATS};
 use wgpu::util::DeviceExt;
 
-/// Target height of the low-res scene. The actual scale is the nearest whole number of screen
-/// pixels per game pixel, so every game pixel is a perfect square.
+/// Default target height of the low-res scene (the "Pixel size" option changes it). The actual scale is
+/// the nearest whole number of screen pixels per game pixel, so every game pixel is a perfect square.
 const PIXEL_TARGET_H: f32 = 320.0;
 const MAX_DYN_VERTS: usize = 150_000;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -48,6 +48,7 @@ pub struct Renderer {
     dyn_vb: wgpu::Buffer,
 
     low: LowRes,
+    target_h: f32,
 }
 
 fn canvas_pixel_size(canvas: &web_sys::HtmlCanvasElement) -> (u32, u32) {
@@ -57,8 +58,8 @@ fn canvas_pixel_size(canvas: &web_sys::HtmlCanvasElement) -> (u32, u32) {
     (w, h)
 }
 
-fn make_low_res(device: &wgpu::Device, w: u32, h: u32) -> LowRes {
-    let scale = (h as f32 / PIXEL_TARGET_H).round().max(1.0) as u32;
+fn make_low_res(device: &wgpu::Device, w: u32, h: u32, target_h: f32) -> LowRes {
+    let scale = (h as f32 / target_h).round().max(1.0) as u32;
     let lw = (w + scale - 1) / scale;
     let lh = (h + scale - 1) / scale;
     let size = wgpu::Extent3d { width: lw.max(1), height: lh.max(1), depth_or_array_layers: 1 };
@@ -297,7 +298,7 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
-        let low = make_low_res(&device, w, h);
+        let low = make_low_res(&device, w, h, PIXEL_TARGET_H);
         let post_bg = make_post_bg(&device, &post_bgl, &low, &post_buf);
 
         Ok(Renderer {
@@ -317,6 +318,7 @@ impl Renderer {
             static_count: (static_data.len() / FLOATS_PER_VERTEX) as u32,
             dyn_vb,
             low,
+            target_h: PIXEL_TARGET_H,
         })
     }
 
@@ -331,9 +333,19 @@ impl Renderer {
             self.config.width = w;
             self.config.height = h;
             self.surface.configure(&self.device, &self.config);
-            self.low = make_low_res(&self.device, w, h);
+            self.low = make_low_res(&self.device, w, h, self.target_h);
             self.post_bg = make_post_bg(&self.device, &self.post_bgl, &self.low, &self.post_buf);
         }
+    }
+
+    /// The "Pixel size" option: how many game pixels tall the scene is (smaller = chunkier).
+    pub fn set_pixel_target(&mut self, target_h: f32) {
+        if (target_h - self.target_h).abs() < 0.5 {
+            return;
+        }
+        self.target_h = target_h;
+        self.low = make_low_res(&self.device, self.config.width, self.config.height, target_h);
+        self.post_bg = make_post_bg(&self.device, &self.post_bgl, &self.low, &self.post_buf);
     }
 
     /// Replaces the static world geometry (used when you walk through a gate into another area).

@@ -4,6 +4,7 @@
 
 use crate::data::*;
 use crate::game::*;
+use crate::sketch;
 use crate::world::Area;
 
 fn hex(c: [f32; 3]) -> String {
@@ -20,6 +21,9 @@ pub fn build(g: &Game) -> Vec<(&'static str, String)> {
     vec![
         ("hud-clock", clock(g)),
         ("hud-candles", format!("🕯️ {}", g.save.candles)),
+        ("hud-book", book_badge(g)),
+        ("hud-sense", sense(g)),
+        ("hud-fps", if g.settings.show_fps { format!("{:.0} fps", g.fps) } else { String::new() }),
         ("hud-followers", followers(g)),
         ("hud-toasts", g.toasts.iter().map(|t| format!("<div>{}</div>", t.text)).collect()),
         ("hud-prompt", prompt(g)),
@@ -88,7 +92,7 @@ fn prompt(g: &Game) -> String {
         let d = &SPIRITS[sp.def];
         lines.push(format!("<b>{}</b><br><small>{}</small>", d.name, d.hint));
     }
-    if g.time < 40.0 && lines.is_empty() {
+    if g.settings.hints && g.time < 40.0 && lines.is_empty() {
         lines.push(if g.area == Area::Hollow {
             "<small>Soul Cake grows here. Some spirits only come out in the right weather, and the crypt hums a tune...</small>"
                 .to_string()
@@ -97,12 +101,12 @@ fn prompt(g: &Game) -> String {
                 .to_string()
         } else {
             "<small>Gather treats from the glowing plants (<kbd>E</kbd>), set one down (<kbd>Space</kbd>) \
-             and wait nearby for hungry spirits.</small>"
+             and wait nearby for hungry spirits. A soft chime means one is close.</small>"
                 .to_string()
         });
     }
     let n = g.followers().len();
-    if n > 0 && !g.near_home() {
+    if g.settings.hints && n > 0 && !g.near_home() {
         let way = if g.area == Area::Hollow { "Bring them back through the gate to the cottage!" } else { "Bring them to the cottage!" };
         lines.push(format!("<small>{n} friend{} following. {way}</small>", if n == 1 { "" } else { "s" }));
     }
@@ -133,38 +137,137 @@ fn shop(g: &Game) -> String {
     s
 }
 
-fn journal(g: &Game) -> String {
-    let mut s = String::from("<h3>Spirit journal <small>(J to close)</small></h3>");
-    for (i, d) in SPIRITS.iter().enumerate() {
-        let body = if g.save.discovered[i] {
-            format!(
-                "<b>{}</b> ×{}<small>Likes {} · Appears: {}</small><small>{}</small>{}",
-                d.name,
-                g.save.residents[i],
-                TREATS[d.favorite].name,
-                d.conditions_text(),
-                match (d.needs_puzzle, d.area) {
-                    (true, 0) => "Wakes only when the glade's three lanterns are lit.",
-                    (true, 1) => "Wakes only when the crypt's melody is repeated on the rune stones.",
-                    (true, _) => "Rises in daylight, once all four lily lamps by the shed glow.",
-                    _ => d.hint,
-                },
-                if d.unique { "<small>One of a kind: once it lives at your cottage, it never returns.</small>" } else { "" }
-            )
-        } else if g.save.seen[i] {
-            format!("<b>{}</b><small>{}</small><small>Befriend it to learn more.</small>", d.name, d.hint)
-        } else {
-            "<b>???</b><small>Not yet seen.</small>".to_string()
-        };
-        let place = if i == 0 || SPIRITS[i - 1].area != d.area {
-            let name = Area::ALL[d.area].name();
-            format!("<div class=\"area\">{name}</div>")
-        } else {
-            String::new()
-        };
-        s.push_str(&format!("{place}<div class=\"entry\">{}{}</div>", dot(d.color), body));
+/// "7/60" and a nudge when there is something new to read.
+fn book_badge(g: &Game) -> String {
+    let (got, all) = g.save.journal_progress();
+    if g.journal_unread > 0 && !g.show_journal {
+        format!("<span class=\"newnote\">📖 {got}/{all} · new note! <kbd>J</kbd></span>")
+    } else {
+        format!("📖 {got}/{all}")
     }
-    s
+}
+
+const ARROWS: [&str; 8] = ["↑", "↗", "→", "↘", "↓", "↙", "←", "↖"];
+const COMPASS: [&str; 8] = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"];
+
+/// Which of 8 directions on screen (up the screen = north) a unit vector points to.
+pub fn compass_index(dir: crate::math::Vec3) -> usize {
+    let angle = dir.x.atan2(-dir.z); // 0 = up, clockwise
+    ((angle / std::f32::consts::FRAC_PI_4).round() as i32).rem_euclid(8) as usize
+}
+
+/// The compass hint for a spirit you can sense but not yet see.
+fn sense(g: &Game) -> String {
+    let Some(sn) = g.sense else { return String::new() };
+    if !g.settings.shimmer || g.show_journal || g.travel.is_some() || sn.dist < 8.0 {
+        return String::new();
+    }
+    let i = compass_index(sn.dir);
+    let adj = if !sn.fresh {
+        "A familiar shimmer"
+    } else if sn.strength < 0.33 {
+        "A faint shimmer"
+    } else if sn.strength < 0.66 {
+        "A shimmer"
+    } else {
+        "A bright shimmer"
+    };
+    format!("<span class=\"arrow\">{}</span> {} {} to the {}", ARROWS[i], dot(SPIRITS[sn.def].color), adj, COMPASS[i])
+}
+
+fn stars(n: usize) -> String {
+    format!("{}{}", "★".repeat(n), "☆".repeat(N_CLUES - n))
+}
+
+fn behavior_note(b: Behavior) -> &'static str {
+    match b {
+        Behavior::Curious => "Curious: drifts over to take a look at you.",
+        Behavior::Playful => "Playful: zig-zags about, quick on its feet.",
+        Behavior::Shy => "Shy: bolts if you rush it. Stand still, a little way off.",
+    }
+}
+
+fn note(known: bool, got: String, todo: &str) -> String {
+    if known {
+        format!("<li class=\"got\">{got}</li>")
+    } else {
+        format!("<li class=\"todo\">{todo}</li>")
+    }
+}
+
+/// One spirit's page: its sketch, a row of stars and the notes you have written so far.
+fn card(g: &Game, i: usize) -> String {
+    let d = &SPIRITS[i];
+    let sv = &g.save;
+    if !sv.knows(i, Clue::Seen) {
+        return format!(
+            "<div class=\"card unseen\"><div class=\"sketch\">{}</div><b class=\"nm\">???</b><div class=\"stars\">{}</div>\
+             <ul class=\"notes\"><li class=\"todo\">Not seen yet. Listen for soft chimes and look for a shimmer.</li></ul></div>",
+            sketch::sketch(i, sv),
+            stars(0)
+        );
+    }
+    let mut notes = String::new();
+    notes.push_str(&format!("<li class=\"got hint\">{}</li>", d.hint));
+    notes.push_str(&note(sv.knows(i, Clue::Habits), behavior_note(d.behavior).to_string(), "Watch it for a while to see how it behaves."));
+    notes.push_str(&note(
+        sv.knows(i, Clue::Likes),
+        format!("Favorite: {} {}", dot(TREATS[d.favorite].color), TREATS[d.favorite].name),
+        "Put a treat out and see what it comes running for.",
+    ));
+    notes.push_str(&note(sv.knows(i, Clue::When), format!("Appears: {}", d.conditions_text()), "Watch it drift away to learn when it comes out."));
+    let home = if sv.knows(i, Clue::Friend) {
+        let mut t = format!("At your cottage ×{} · +{} 🕯️", sv.residents[i], d.reward);
+        if d.needs_puzzle {
+            t.push_str(match d.area {
+                0 => "<br>Wakes only when the glade's three lanterns are lit.",
+                1 => "<br>Wakes only when the crypt's melody is repeated on the rune stones.",
+                _ => "<br>Rises in daylight, once all four lily lamps by the shed glow.",
+            });
+        }
+        if d.unique {
+            t.push_str("<br><em>One of a kind: once it lives at your cottage, it never returns.</em>");
+        }
+        t
+    } else {
+        String::new()
+    };
+    notes.push_str(&note(sv.knows(i, Clue::Friend), home, "Win it over and bring it home."));
+    let done = if sv.pages(i) == N_CLUES { " complete" } else { "" };
+    format!(
+        "<div class=\"card{done}\"><div class=\"sketch\">{}</div><b class=\"nm\">{}</b><div class=\"stars\">{}</div><ul class=\"notes\">{notes}</ul></div>",
+        sketch::sketch(i, sv),
+        d.name,
+        stars(sv.pages(i))
+    )
+}
+
+fn journal(g: &Game) -> String {
+    let (got, all) = g.save.journal_progress();
+    let page = g.journal_page.min(N_AREAS - 1);
+    let mut tabs = String::new();
+    for (a, area) in Area::ALL.iter().enumerate() {
+        let (mut n, mut tot) = (0, 0);
+        for (i, d) in SPIRITS.iter().enumerate() {
+            if d.area == a {
+                n += g.save.pages(i);
+                tot += N_CLUES;
+            }
+        }
+        let on = if a == page { " on" } else { "" };
+        tabs.push_str(&format!("<span class=\"tab{on}\">{} <small>{n}/{tot}</small></span>", area.name()));
+    }
+    let mut cards = String::new();
+    for i in 0..N_SPIRITS {
+        if SPIRITS[i].area == page {
+            cards.push_str(&card(g, i));
+        }
+    }
+    format!(
+        "<div class=\"book-head\"><h3>Spirit journal</h3><span class=\"prog\">{got} / {all} notes</span>\
+         <span class=\"keys\"><kbd>A</kbd> <kbd>D</kbd> turn the page · <kbd>J</kbd> close</span></div>\
+         <div class=\"tabs\">{tabs}</div><div class=\"cards\">{cards}</div>"
+    )
 }
 
 fn debug(g: &Game) -> String {
@@ -199,6 +302,7 @@ mod tests {
         let get = |k: &str| h.iter().find(|(id, _)| *id == k).unwrap().1.clone();
         assert!(get("hud-shop").contains("Brighter Lantern"));
         assert!(get("hud-journal").contains("Pumpkin Pip") && get("hud-journal").contains("???"));
+        assert!(get("hud-book").contains("📖"));
         assert!(get("hud-hotbar").contains("Candy Corn"));
         assert!(get("hud-clock").contains("18:30"));
         assert!(!get("hud-clock").contains("approaching"));
@@ -225,7 +329,10 @@ mod tests {
         g.save.seen = [true; N_SPIRITS];
         g.save.discovered = [true; N_SPIRITS];
         g.show_journal = true;
+        g.journal_page = 1;
         assert!(get(&g, "hud-journal").contains("Old Marrow") && get(&g, "hud-journal").contains("One of a kind"));
+        assert!(!get(&g, "hud-journal").contains("Lady Lotus"), "pages show one area at a time");
+        g.act(Action::JournalPage(1));
         assert!(get(&g, "hud-journal").contains("Willow Pond") && get(&g, "hud-journal").contains("Lady Lotus"));
     }
 
@@ -244,5 +351,135 @@ mod tests {
         assert!(get(&g, "hud-clock").contains("Willow Pond"));
         g.player.pos = g.world.lamps[2] + Vec3::new(0.0, 0.0, 1.5);
         assert!(get(&g, "hud-prompt").contains("lamp 3"), "{}", get(&g, "hud-prompt"));
+    }
+
+    #[test]
+    fn compass_hint_points_at_the_shimmer_and_respects_the_options() {
+        use crate::math::Vec3;
+        let mut g = Game::new(Save::default(), 4);
+        let get = |g: &Game, k: &str| build(g).iter().find(|(id, _)| *id == k).unwrap().1.clone();
+        assert!(get(&g, "hud-sense").is_empty(), "nothing nearby");
+        let sn = |dir: Vec3, dist: f32, fresh: bool| Sense { def: 1, dist, dir, strength: 0.5, fresh };
+        g.sense = Some(sn(Vec3::new(0.0, 0.0, -1.0), 14.0, true));
+        let up = get(&g, "hud-sense");
+        assert!(up.contains("north") && !up.contains("north-"), "{up}");
+        assert!(up.contains("↑") && up.contains("A shimmer"));
+        g.sense = Some(sn(Vec3::new(1.0, 0.0, 1.0).normalized(), 14.0, true));
+        assert!(get(&g, "hud-sense").contains("south-east") && get(&g, "hud-sense").contains("↘"));
+        g.sense = Some(sn(Vec3::new(-1.0, 0.0, 0.0), 14.0, false));
+        assert!(get(&g, "hud-sense").contains("familiar") && get(&g, "hud-sense").contains("west"));
+        // Close enough to see: the "who's that?" panel takes over.
+        g.sense = Some(sn(Vec3::new(-1.0, 0.0, 0.0), 5.0, true));
+        assert!(get(&g, "hud-sense").is_empty());
+        // Options.
+        g.sense = Some(sn(Vec3::new(-1.0, 0.0, 0.0), 14.0, true));
+        g.settings.shimmer = false;
+        assert!(get(&g, "hud-sense").is_empty());
+        for (dir, want) in [((0.0, -1.0), 0), ((1.0, -1.0), 1), ((1.0, 0.0), 2), ((0.0, 1.0), 4), ((-1.0, 1.0), 5), ((-1.0, -1.0), 7)] {
+            assert_eq!(compass_index(Vec3::new(dir.0, 0.0, dir.1).normalized()), want);
+        }
+    }
+
+    #[test]
+    fn hint_lines_can_be_turned_off_but_interaction_prompts_stay() {
+        let mut g = Game::new(Save::default(), 5);
+        let get = |g: &Game, k: &str| build(g).iter().find(|(id, _)| *id == k).unwrap().1.clone();
+        g.player.pos = g.world.home + Vec3::new(30.0, 0.0, 30.0);
+        assert!(get(&g, "hud-prompt").contains("Gather treats"), "tutorial text shows early on");
+        g.settings.hints = false;
+        assert!(get(&g, "hud-prompt").is_empty());
+        if let Some(src) = g.sources.first() {
+            g.player.pos = src.pos;
+            assert!(get(&g, "hud-prompt").contains("Gather"), "E prompts are not hints");
+        }
+        g.settings.show_fps = true;
+        assert!(get(&g, "hud-fps").contains("fps"));
+        g.settings.show_fps = false;
+        assert!(get(&g, "hud-fps").is_empty());
+    }
+
+    #[test]
+    fn journal_pages_show_what_you_know_and_hint_at_the_rest() {
+        let mut g = Game::new(Save::default(), 6);
+        let page = |g: &Game| build(g).iter().find(|(id, _)| *id == "hud-journal").unwrap().1.clone();
+        g.show_journal = true;
+        let blank = page(&g);
+        assert!(blank.contains("???") && blank.contains("0 / 60 notes") && blank.contains("<svg"), "four '?' boxes to start");
+        assert_eq!(blank.matches("class=\"card unseen\"").count(), 4);
+
+        g.save.learn(1, Clue::Seen);
+        let seen = page(&g);
+        assert!(seen.contains("Mizzle") && seen.contains("Watch it for a while") && seen.contains("Put a treat out"));
+        assert!(!seen.contains("Favorite:"));
+
+        g.save.learn(1, Clue::Likes);
+        g.save.learn(1, Clue::Habits);
+        g.save.learn(1, Clue::When);
+        let most = page(&g);
+        assert!(most.contains("Favorite:") && most.contains("Moon Milk") && most.contains("Playful") && most.contains("Appears: Rain"));
+        assert!(most.contains("Win it over and bring it home"));
+        assert!(!most.contains("complete"));
+        assert!(most.contains("★★★★☆"));
+
+        g.save.residents[1] = 2;
+        g.save.learn(1, Clue::Friend);
+        let done = page(&g);
+        assert!(done.contains("At your cottage ×2") && done.contains("★★★★★") && done.contains("card complete"));
+
+        // The badge nudges you toward new notes until you open the book.
+        g.show_journal = false;
+        g.journal_unread = 2;
+        let badge = build(&g).iter().find(|(id, _)| *id == "hud-book").unwrap().1.clone();
+        assert!(badge.contains("new note") && badge.contains("/60"));
+        g.journal_unread = 0;
+        let badge = build(&g).iter().find(|(id, _)| *id == "hud-book").unwrap().1.clone();
+        assert!(!badge.contains("new note"));
+    }
+
+    /// Writes the HUD panels for a few journal states to $DUMP_DIR so they can be screenshotted in a real
+    /// browser: `DUMP_DIR=/some/dir cargo test dump_journal -- --ignored`.
+    #[test]
+    #[ignore]
+    fn dump_journal_html() {
+        let dir = std::env::var("DUMP_DIR").expect("set DUMP_DIR");
+        let mut g = Game::new(Save::default(), 7);
+        g.show_journal = true;
+        // A mid-game save: a bit of everything.
+        let sv = &mut g.save;
+        for i in 0..N_SPIRITS {
+            sv.seen[i] = i != 3 && i != 7 && i != 11;
+        }
+        sv.learn(0, Clue::Friend);
+        sv.residents[0] = 3;
+        sv.learn(1, Clue::Habits);
+        sv.learn(1, Clue::Likes);
+        sv.learn(2, Clue::Habits);
+        sv.learn(2, Clue::When);
+        sv.learn(4, Clue::Friend);
+        sv.residents[4] = 1;
+        sv.learn(5, Clue::Habits);
+        sv.learn(5, Clue::Likes);
+        sv.learn(5, Clue::When);
+        sv.learn(6, Clue::Habits);
+        sv.learn(8, Clue::Friend);
+        sv.residents[8] = 2;
+        sv.learn(9, Clue::Likes);
+        sv.learn(10, Clue::Habits);
+        sv.learn(10, Clue::Likes);
+        sv.learn(10, Clue::When);
+        for page in 0..3 {
+            g.journal_page = page;
+            let h = build(&g);
+            let get = |k: &str| h.iter().find(|(id, _)| *id == k).unwrap().1.clone();
+            std::fs::write(format!("{dir}/journal_{page}.html"), get("hud-journal")).unwrap();
+        }
+        // Everything learned, to see the finished look (and the long Marrow / Lotus notes).
+        for i in 0..N_SPIRITS {
+            g.save.learn(i, Clue::Friend);
+            g.save.residents[i] = 1;
+        }
+        g.journal_page = 1;
+        let h = build(&g);
+        std::fs::write(format!("{dir}/journal_full.html"), h.iter().find(|(id, _)| *id == "hud-journal").unwrap().1.clone()).unwrap();
     }
 }

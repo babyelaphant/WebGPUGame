@@ -56,15 +56,17 @@ pub fn build_globals(game: &Game, aspect: f32) -> Vec<f32> {
 
 pub fn build_post(game: &Game, low_w: u32, low_h: u32, scale: u32) -> [f32; POST_FLOATS] {
     let l = game.lighting();
+    // The "Weather effects" and "Vignette" options only change how the screen looks, never the light.
+    let wx = game.settings.weather_mul();
     [
         low_w as f32,
         low_h as f32,
         scale as f32,
         game.time,
-        l.rain,
-        l.fog_amt,
+        l.rain * wx,
+        l.fog_amt * wx,
         l.night,
-        0.42,
+        game.settings.vignette_amt(),
         l.fog_col[0],
         l.fog_col[1],
         l.fog_col[2],
@@ -524,6 +526,9 @@ pub fn build_dynamic(game: &Game, m: &mut Mesh) {
     }
 
     draw_player(m, game);
+    if game.settings.shimmer {
+        draw_shimmers(m, game);
+    }
 
     // Befriending sparkles.
     for b in &game.bursts {
@@ -551,6 +556,47 @@ pub fn build_dynamic(game: &Game, m: &mut Mesh) {
             let y = 0.6 + 1.5 * (0.5 + 0.5 * (f * 2.1 + t * 0.6).sin());
             let blink = ((t * 1.3 + f).sin() * 0.5 + 0.5).powf(0.5);
             m.box_(v(x, y, z), v(0.05, 0.05, 0.05) * (0.4 + blink), fly_col, 1.0);
+        }
+    }
+}
+
+/// Sparkles rising from wild spirits you can sense: the closer you are, the more obvious. Spirits you
+/// have never befriended also send out a slow ring on the ground, so a new face stands out.
+fn draw_shimmers(m: &mut Mesh, game: &Game) {
+    let t = game.time;
+    let radius = game.sense_radius();
+    for s in &game.spirits {
+        if matches!(s.state, SpState::Follow | SpState::Leaving) || s.fade < 0.2 {
+            continue;
+        }
+        let dist = s.pos.dist_xz(game.player.pos);
+        if dist > radius {
+            continue;
+        }
+        let d = &SPIRITS[s.def];
+        let fresh = !game.save.discovered[s.def];
+        // Brighten the species colour so the motes read as light, not as little coloured cubes.
+        let c = [
+            (d.color[0] * 0.5 + 0.5).min(1.0),
+            (d.color[1] * 0.5 + 0.5).min(1.0),
+            (d.color[2] * 0.5 + 0.5).min(1.0),
+        ];
+        let n = if fresh { 5 } else { 3 };
+        for k in 0..n {
+            let ph = (t * 0.5 + k as f32 / n as f32 + s.phase * 0.07).fract();
+            let ang = TAU * k as f32 / n as f32 + t * 1.2;
+            let rad = 0.62 * (1.0 - 0.5 * ph);
+            let size = 0.11 * (ph * (1.0 - ph) * 4.0).sqrt() * s.fade;
+            m.box_(v(s.pos.x + ang.cos() * rad, 0.35 + ph * 2.7, s.pos.z + ang.sin() * rad), v(size, size, size), c, 1.0);
+        }
+        if fresh && dist > 5.0 {
+            let ph = (t * 0.6 + s.phase * 0.1).fract();
+            let r = 0.7 + ph * 2.4;
+            let size = 0.12 * (1.0 - ph) * s.fade;
+            for j in 0..10 {
+                let a = TAU * j as f32 / 10.0 + t * 0.2;
+                m.box_(v(s.pos.x + a.cos() * r, 0.14, s.pos.z + a.sin() * r), v(size, size, size), c, 1.0);
+            }
         }
     }
 }
@@ -892,6 +938,15 @@ mod tests {
                 g.save.upgrades[POND_KEY] = 1;
                 g.player.pos = g.world.gate_to(Area::Pond).pos + v(1.5, 0.0, -7.0);
             })),
+            ("shimmer_night", 20.0, Weather::Clear, Box::new(|g: &mut Game| {
+                g.player.pos = v(-6.0, 0.0, 14.0);
+                g.spawn_spirit(0, v(5.0, 0.0, 12.0));
+                g.spawn_spirit(0, v(-14.0, 0.0, 8.0));
+            })),
+            ("title_view", 19.4, Weather::Clear, Box::new(|g: &mut Game| {
+                g.save.residents = [1, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+                g.player.pos = v(0.0, 0.0, 6.0);
+            })),
             ("hollow_rain", 14.0, Weather::Rain, Box::new(|g: &mut Game| {
                 g.enter_area(Area::Hollow);
                 g.player.pos = v(-14.0, 0.0, 22.0);
@@ -930,6 +985,11 @@ mod tests {
                     sp.fade = 1.0;
                     sp.yaw = 0.0;
                 }
+            }
+            if name == "title_view" {
+                // The camera the title screen uses: beside the cottage, so it sits right of centre.
+                let h = g.world.home;
+                g.cam = v(h.x - 9.0, 0.0, h.z + 5.0);
             }
             if name == "hollow_crypt" {
                 g.runes.flash = [0.0, 0.7, 0.0, 0.4]; // mid-melody glow

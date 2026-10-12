@@ -347,6 +347,37 @@ pub fn fmt_hour(h: f32) -> String {
     format!("{hh:02}:{mm:02}")
 }
 
+/// The things the journal can learn about a spirit. Each one fills in more of its sketch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Clue {
+    /// You laid eyes on it (silhouette + name).
+    Seen,
+    /// You watched it for a while (line drawing + how it behaves).
+    Habits,
+    /// You saw it come running for a treat (its favorite).
+    Likes,
+    /// You saw it fade away when the weather or hour changed (when it appears).
+    When,
+    /// You brought it home (full colour + the whole story).
+    Friend,
+}
+
+pub const N_CLUES: usize = 5;
+
+impl Clue {
+    pub const ALL: [Clue; N_CLUES] = [Clue::Seen, Clue::Habits, Clue::Likes, Clue::When, Clue::Friend];
+
+    /// Bit in `Save::clues` for the clues that are stored there (Seen / Friend have their own arrays).
+    fn bit(self) -> u8 {
+        match self {
+            Clue::Habits => 1,
+            Clue::Likes => 2,
+            Clue::When => 4,
+            Clue::Seen | Clue::Friend => 0,
+        }
+    }
+}
+
 /// Everything that persists between sessions.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Save {
@@ -359,6 +390,8 @@ pub struct Save {
     pub seen: [bool; N_SPIRITS],
     /// Befriended at least once.
     pub discovered: [bool; N_SPIRITS],
+    /// Journal clues learned by watching (bits: 1 habits, 2 likes, 4 when).
+    pub clues: [u8; N_SPIRITS],
 }
 
 impl Default for Save {
@@ -370,6 +403,7 @@ impl Default for Save {
             residents: [0; N_SPIRITS],
             seen: [false; N_SPIRITS],
             discovered: [false; N_SPIRITS],
+            clues: [0; N_SPIRITS],
         }
     }
 }
@@ -390,14 +424,47 @@ impl Save {
     pub fn serialize(&self) -> String {
         let b = |v: &[bool]| join(&v.iter().map(|x| *x as u8).collect::<Vec<_>>());
         format!(
-            "v1\ncandles={}\nupgrades={}\ntreats={}\nresidents={}\nseen={}\ndiscovered={}\n",
+            "v1\ncandles={}\nupgrades={}\ntreats={}\nresidents={}\nseen={}\ndiscovered={}\nclues={}\n",
             self.candles,
             join(&self.upgrades),
             join(&self.treats),
             join(&self.residents),
             b(&self.seen),
-            b(&self.discovered)
+            b(&self.discovered),
+            join(&self.clues)
         )
+    }
+
+    /// Does the journal know this about the spirit? (Befriending a spirit teaches you everything.)
+    pub fn knows(&self, i: usize, c: Clue) -> bool {
+        match c {
+            Clue::Seen => self.seen[i] || self.discovered[i],
+            Clue::Friend => self.discovered[i],
+            _ => self.discovered[i] || self.clues[i] & c.bit() != 0,
+        }
+    }
+
+    /// Learns a clue. Returns true only if it was news.
+    pub fn learn(&mut self, i: usize, c: Clue) -> bool {
+        if self.knows(i, c) {
+            return false;
+        }
+        match c {
+            Clue::Seen => self.seen[i] = true,
+            Clue::Friend => self.discovered[i] = true,
+            _ => self.clues[i] |= c.bit(),
+        }
+        true
+    }
+
+    /// How many of the 5 journal notes this spirit has.
+    pub fn pages(&self, i: usize) -> usize {
+        Clue::ALL.iter().filter(|c| self.knows(i, **c)).count()
+    }
+
+    /// (notes written, notes possible) across the whole journal.
+    pub fn journal_progress(&self) -> (usize, usize) {
+        ((0..N_SPIRITS).map(|i| self.pages(i)).sum(), N_SPIRITS * N_CLUES)
     }
 
     /// Tolerant parser: unknown/missing/garbled fields fall back to defaults.
@@ -410,6 +477,7 @@ impl Save {
                 "upgrades" => parse_list(v, &mut s.upgrades),
                 "treats" => parse_list(v, &mut s.treats),
                 "residents" => parse_list(v, &mut s.residents),
+                "clues" => parse_list(v, &mut s.clues),
                 "seen" | "discovered" => {
                     let mut raw = [0u8; N_SPIRITS];
                     parse_list(v, &mut raw);
@@ -449,10 +517,33 @@ mod tests {
         s.residents = [0, 4, 0, 1, 2, 0, 0, 3, 1, 0, 0, 1];
         s.seen = [true, true, false, true, true, false, false, true, true, false, false, true];
         s.discovered = [false, true, false, true, true, false, false, true, false, false, false, true];
+        s.clues = [1, 0, 7, 2, 0, 4, 0, 0, 1, 0, 0, 0];
         assert_eq!(Save::parse(&s.serialize()), s);
         let g = Save::parse("lol\ncandles=abc\nupgrades=9,9,9,9,9\n===\n");
         assert_eq!(g.candles, 0);
         assert_eq!(g.upgrades, [3, 3, 3, 1, 1]);
+    }
+
+    #[test]
+    fn journal_clues_are_learned_once_and_befriending_teaches_everything() {
+        let mut s = Save::default();
+        assert_eq!(s.journal_progress(), (0, N_SPIRITS * N_CLUES));
+        assert!(!s.knows(0, Clue::Seen));
+        assert!(s.learn(0, Clue::Seen), "first sighting is news");
+        assert!(!s.learn(0, Clue::Seen), "second time is not");
+        assert!(s.seen[0]);
+        assert!(s.learn(0, Clue::Likes));
+        assert!(s.knows(0, Clue::Likes) && !s.knows(0, Clue::Habits) && !s.knows(0, Clue::When));
+        assert_eq!(s.pages(0), 2);
+        // Bringing it home fills the rest in.
+        assert!(s.learn(0, Clue::Friend));
+        assert_eq!(s.pages(0), N_CLUES);
+        assert!(!s.learn(0, Clue::Habits), "already known through friendship");
+        assert_eq!(s.pages(1), 0, "other spirits are unaffected");
+        // An old save that only has seen/discovered still reads correctly.
+        let old = Save::parse("v1\ncandles=5\nseen=1,1\ndiscovered=0,1\n");
+        assert_eq!(old.pages(0), 1);
+        assert_eq!(old.pages(1), N_CLUES);
     }
 
     #[test]

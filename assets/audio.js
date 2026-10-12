@@ -55,10 +55,15 @@
     const verbGain = ctx.createGain(); verbGain.gain.value = 0.38;
     verb.connect(verbGain); verbGain.connect(master);
 
+    // Player volume sliders (0..1). Master scales everything; the rest scale their own bus.
+    const vol = { master: 1, music: 1, sfx: 1, ambience: 1 };
+    const AMB_BASE = 0.9;
     const dry = ctx.createGain(); dry.connect(master);
     const sfxBus = ctx.createGain(); sfxBus.connect(dry); sfxBus.connect(verb);
-    const musicBus = ctx.createGain(); musicBus.gain.value = 0.55; musicBus.connect(dry); musicBus.connect(verb);
-    const ambBus = ctx.createGain(); ambBus.gain.value = 0.9; ambBus.connect(master);
+    // Music gets its own volume stage after the mood-driven bus, so the two never fight.
+    const musicVol = ctx.createGain(); musicVol.connect(dry); musicVol.connect(verb);
+    const musicBus = ctx.createGain(); musicBus.gain.value = 0.55; musicBus.connect(musicVol);
+    const ambBus = ctx.createGain(); ambBus.connect(master);
 
     const noiseBuf = makeNoise(ctx, 3);
 
@@ -148,6 +153,13 @@
       flee(t) { blip('triangle', 720, 300, t, 0.24, 0.09); },
       nope(t) { blip('sine', 230, 220, t, 0.12, 0.10); blip('sine', 200, 190, t + 0.12, 0.16, 0.09); },
       ui(t) { bell(mtof(96), t, 0.07, 0.25); },
+      // Journal: a quick pencil scratch, then a tiny bell.
+      clue(t) {
+        puff(t, 0.16, 0.05, 3400, 1.4);
+        puff(t + 0.09, 0.14, 0.045, 4200, 1.4);
+        bell(mtof(88), t + 0.22, 0.10, 1.4);
+        bell(mtof(95), t + 0.30, 0.08, 1.6);
+      },
       // Graveyard Hollow: the four rune stones each have their own bell, and the gate creaks.
       rune0(t) { bell(mtof(64), t, 0.20, 1.8); },
       rune1(t) { bell(mtof(67), t, 0.20, 1.8); },
@@ -236,10 +248,40 @@
         setTarget(cricG.gain, 0.022 * night * (1 - rain) * (1 - 0.6 * fog));
         setTarget(musicBus.gain, 0.55 * (1 - 0.35 * rain) * (1 - 0.25 * night));
       },
+      // Player volume sliders, each 0..1: { master, music, sfx, ambience }.
+      setVolumes(v) {
+        ['master', 'music', 'sfx', 'ambience'].forEach((k) => {
+          if (v && typeof v[k] === 'number' && isFinite(v[k])) vol[k] = Math.max(0, Math.min(1, v[k]));
+        });
+        setTarget(master.gain, muted ? 0 : MASTER * vol.master, 0.05);
+        setTarget(sfxBus.gain, vol.sfx, 0.05);
+        setTarget(musicVol.gain, vol.music, 0.05);
+        setTarget(ambBus.gain, AMB_BASE * vol.ambience, 0.05);
+      },
+      // A spirit is close. near: 0..1 (1 = right here), pan: -1..1 (left/right of you), note: which
+      // spirit (each species has its own pitch, so you can learn them by ear), fresh: never befriended.
+      sense(near, pan, note, fresh) {
+        const SCALE = [79, 81, 84, 86, 88, 91, 93, 96];
+        const n = Math.max(0, Math.floor(note || 0));
+        const f = mtof(SCALE[n % SCALE.length]);
+        const level = (0.035 + 0.075 * Math.max(0, Math.min(1, near || 0))) * (fresh ? 1 : 0.55);
+        const t = ctx.currentTime + 0.01;
+        let dest = sfxBus;
+        if (ctx.createStereoPanner) {
+          const p = ctx.createStereoPanner();
+          p.pan.value = Math.max(-1, Math.min(1, pan || 0));
+          p.connect(sfxBus);
+          dest = p;
+        }
+        // Two quick glints a fifth apart, like a wind chime brushed once.
+        bell(f, t, level, 1.3, dest);
+        bell(f * 1.5, t + 0.11, level * 0.7, 1.1, dest);
+        if (fresh) bell(f * 2, t + 0.24, level * 0.45, 1.0, dest);
+      },
       setMuted(m) {
         muted = !!m;
         try { window.localStorage.setItem('sc-muted', muted ? '1' : '0'); } catch (e) { /* ignore */ }
-        setTarget(master.gain, muted ? 0 : MASTER, 0.08);
+        setTarget(master.gain, muted ? 0 : MASTER * vol.master, 0.08);
       },
       toggleMute() { api.setMuted(!muted); return muted; },
       get muted() { return muted; },
@@ -263,6 +305,7 @@
       },
     };
 
+    api.setVolumes({});
     if (opts.auto !== false) {
       window.setInterval(() => { if (ctx.state === 'running') api.musicTick(); }, 300);
     }

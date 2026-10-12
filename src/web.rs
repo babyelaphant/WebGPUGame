@@ -9,9 +9,11 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use crate::data::Save;
-use crate::game::{Action, Controls, Game, STEP};
+use crate::game::{Action, Controls, Cue, Game, STEP};
 use crate::gfx::Renderer;
+use crate::math::Vec3;
 use crate::mesh::Mesh;
+use crate::settings::Settings;
 use crate::{audio, hud, scene};
 
 const SAVE_KEY: &str = "spirit-collector-save-v1";
@@ -60,6 +62,16 @@ fn write_save(save: &Save) {
     }
 }
 
+/// A one-line summary of a save for the title screen's Continue button.
+fn save_summary(save: &Save) -> String {
+    let friends: u32 = save.residents.iter().sum();
+    format!("🕯️ {} · {} friend{}", save.candles, friends, if friends == 1 { "" } else { "s" })
+}
+
+fn new_seed() -> u64 {
+    (js_sys::Date::now() as u64) ^ 0xC0FFEE
+}
+
 fn controls(down: &HashSet<String>) -> Controls {
     let any = |codes: &[&str]| codes.iter().any(|c| down.contains(*c));
     let axis = |neg: &[&str], pos: &[&str]| (any(pos) as i32 - any(neg) as i32) as f32;
@@ -90,12 +102,22 @@ fn map_key(code: &str) -> Option<Action> {
     })
 }
 
+/// While the journal is open, left/right turn its pages.
+fn map_journal_key(code: &str) -> Option<Action> {
+    Some(match code {
+        "ArrowLeft" | "KeyA" | "KeyQ" => Action::JournalPage(-1),
+        "ArrowRight" | "KeyD" | "KeyE" => Action::JournalPage(1),
+        _ => return None,
+    })
+}
+
 /// Thin bridge to assets/audio.js (`window.gameAudio`). If audio isn't available the game
 /// just runs silently.
 struct AudioBridge {
     obj: JsValue,
     sfx: Option<js_sys::Function>,
     ambience: Option<js_sys::Function>,
+    sense: Option<js_sys::Function>,
 }
 
 impl AudioBridge {
@@ -108,7 +130,20 @@ impl AudioBridge {
         };
         let sfx = get("sfx");
         let ambience = get("ambience");
-        AudioBridge { obj, sfx, ambience }
+        let sense = get("sense");
+        AudioBridge { obj, sfx, ambience, sense }
+    }
+
+    /// A soft "a spirit is near" chime: how close, which side, which species, never befriended yet?
+    fn play_cue(&self, c: &Cue) {
+        if let Some(f) = &self.sense {
+            let args = js_sys::Array::new();
+            args.push(&JsValue::from_f64(c.near as f64));
+            args.push(&JsValue::from_f64(c.pan as f64));
+            args.push(&JsValue::from_f64(c.note as f64));
+            args.push(&JsValue::from_bool(c.fresh));
+            let _ = f.apply(&self.obj, &args);
+        }
     }
 
     fn play(&self, name: &str) {
@@ -125,6 +160,62 @@ impl AudioBridge {
                 &JsValue::from_f64(a.rain as f64),
                 &JsValue::from_f64(a.fog as f64),
             );
+        }
+    }
+}
+
+/// Thin bridge to assets/menu.js (`window.gameMenu`): the title screen, pause menu and settings live
+/// there. If it is missing the game simply never opens a menu.
+struct MenuBridge {
+    obj: JsValue,
+}
+
+impl MenuBridge {
+    fn new(window: &web_sys::Window) -> MenuBridge {
+        let obj = js_sys::Reflect::get(window, &JsValue::from_str("gameMenu")).unwrap_or(JsValue::UNDEFINED);
+        MenuBridge { obj }
+    }
+
+    fn func(&self, name: &str) -> Option<js_sys::Function> {
+        js_sys::Reflect::get(&self.obj, &JsValue::from_str(name)).ok()?.dyn_into::<js_sys::Function>().ok()
+    }
+
+    fn call0(&self, name: &str) -> Option<JsValue> {
+        self.func(name)?.call0(&self.obj).ok()
+    }
+
+    fn is_open(&self) -> bool {
+        self.call0("isOpen").and_then(|v| v.as_bool()).unwrap_or(false)
+    }
+
+    fn on_title(&self) -> bool {
+        self.call0("onTitle").and_then(|v| v.as_bool()).unwrap_or(false)
+    }
+
+    /// "continue" | "new" | "resume" | "quit", or "" when nothing is waiting.
+    fn take_action(&self) -> String {
+        self.call0("takeAction").and_then(|v| v.as_string()).unwrap_or_default()
+    }
+
+    fn settings_version(&self) -> f64 {
+        self.call0("settingsVersion").and_then(|v| v.as_f64()).unwrap_or(0.0)
+    }
+
+    fn settings_text(&self) -> String {
+        self.call0("settingsText").and_then(|v| v.as_string()).unwrap_or_default()
+    }
+
+    fn open_pause(&self) {
+        let _ = self.call0("openPause");
+    }
+
+    fn ready(&self) {
+        let _ = self.call0("ready");
+    }
+
+    fn set_has_save(&self, has: bool, summary: &str) {
+        if let Some(f) = self.func("setHasSave") {
+            let _ = f.call2(&self.obj, &JsValue::from_bool(has), &JsValue::from_str(summary));
         }
     }
 }
@@ -152,7 +243,7 @@ async fn run() -> Result<(), String> {
         .dyn_into()
         .map_err(|_| "#gpu is not a canvas".to_string())?;
 
-    let mut game = Game::new(load_save(), (js_sys::Date::now() as u64) ^ 0xC0FFEE);
+    let mut game = Game::new(load_save(), new_seed());
     let static_mesh = scene::build_static(&game.world);
     let mut renderer = Renderer::new(canvas, &static_mesh.data).await?;
     let mut dyn_mesh = Mesh::new();
@@ -205,6 +296,14 @@ async fn run() -> Result<(), String> {
 
     let audio_bridge = AudioBridge::new(&window);
 
+    // ---- title screen / pause menu / settings (assets/menu.js)
+    let menu = MenuBridge::new(&window);
+    let had_save = storage().and_then(|s| s.get_item(SAVE_KEY).ok().flatten()).is_some();
+    menu.set_has_save(had_save, &save_summary(&game.save));
+    menu.ready();
+    let mut settings_ver = -1.0f64;
+    let mut run_latched = false;
+
     // ---- HUD cache: only touch the DOM when a panel's HTML actually changed
     let mut hud_cache: HashMap<&'static str, (Option<web_sys::Element>, String)> = HashMap::new();
 
@@ -226,30 +325,106 @@ async fn run() -> Result<(), String> {
             game.fps += (1.0 / dt - game.fps) * 0.05;
         }
 
+        // ---- options and menu requests
+        let ver = menu.settings_version();
+        if ver != settings_ver {
+            settings_ver = ver;
+            game.settings = Settings::parse(&menu.settings_text());
+            renderer.set_pixel_target(game.settings.pixel_target_h());
+        }
+        loop {
+            let act = menu.take_action();
+            if act.is_empty() {
+                break;
+            }
+            match act.as_str() {
+                // A fresh game: forget the save, keep the options.
+                "new" => {
+                    let settings = game.settings.clone();
+                    write_save(&Save::default());
+                    game = Game::new(Save::default(), new_seed());
+                    game.settings = settings;
+                }
+                // Back to the title screen: save, then rebuild the world so the title idles in a clean glade.
+                "quit" => {
+                    let settings = game.settings.clone();
+                    let save = game.save.clone();
+                    write_save(&save);
+                    menu.set_has_save(true, &save_summary(&save));
+                    game = Game::new(save, new_seed());
+                    game.settings = settings;
+                }
+                _ => {}
+            }
+        }
+        let menu_open = menu.is_open();
+
         // Discrete actions once per frame; held movement every fixed step.
-        let (ctl, pressed) = {
+        let (mut ctl, pressed) = {
             let mut s = input.borrow_mut();
             (controls(&s.down), std::mem::take(&mut s.pressed))
         };
-        for code in pressed {
-            if let Some(a) = map_key(&code) {
-                game.act(a);
+        if menu_open {
+            // The menu owns the keyboard: nothing reaches the game, and held keys are forgotten.
+            input.borrow_mut().down.clear();
+            ctl = Controls::default();
+        } else {
+            for code in pressed {
+                if code == "Escape" {
+                    if game.show_journal {
+                        game.act(Action::ToggleJournal);
+                    } else {
+                        menu.open_pause();
+                    }
+                    continue;
+                }
+                if (code == "ShiftLeft" || code == "ShiftRight") && game.settings.run_toggle {
+                    run_latched = !run_latched;
+                }
+                let action = if game.show_journal { map_journal_key(&code).or_else(|| map_key(&code)) } else { map_key(&code) };
+                if let Some(a) = action {
+                    game.act(a);
+                }
+            }
+            if game.show_journal {
+                ctl = Controls::default(); // reading, not walking
+            }
+            if game.settings.run_toggle {
+                if ctl.x == 0.0 && ctl.z == 0.0 {
+                    run_latched = false;
+                }
+                ctl.run = run_latched;
             }
         }
-        acc += dt;
-        let mut steps = 0;
-        while acc >= STEP && steps < 5 {
-            game.update(STEP, &ctl);
-            acc -= STEP;
-            steps += 1;
-        }
-        if steps == 5 {
-            acc = 0.0; // fell far behind (tab was hidden): don't spiral
+
+        if menu_open {
+            acc = 0.0;
+            if menu.on_title() {
+                // Title screen: the world idles while the camera drifts slowly beside the cottage.
+                game.time += dt;
+                let h = game.world.home;
+                let t = game.time;
+                game.cam = Vec3::new(h.x - 9.0 + (t * 0.11).sin() * 2.5, 0.0, h.z + 5.0 + (t * 0.07).cos() * 1.5);
+            }
+        } else {
+            acc += dt;
+            let mut steps = 0;
+            while acc >= STEP && steps < 5 {
+                game.update(STEP, &ctl);
+                acc -= STEP;
+                steps += 1;
+            }
+            if steps == 5 {
+                acc = 0.0; // fell far behind (tab was hidden): don't spiral
+            }
         }
 
         // Sound: one-shot events every frame, world mood a few times a second.
         for s in game.sfx.drain(..) {
             audio_bridge.play(s.name());
+        }
+        for c in game.cues.drain(..) {
+            audio_bridge.play_cue(&c);
         }
         if frame_no % 6 == 1 {
             audio_bridge.set_ambience(&audio::ambience(&game));

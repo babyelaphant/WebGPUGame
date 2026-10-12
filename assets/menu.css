@@ -1,0 +1,104 @@
+/* Title screen, pause menu and settings (see menu.js). Uses the colour variables from index.html. */
+#menu { position: fixed; inset: 0; z-index: 8; font-family: "Fredoka", system-ui, sans-serif; color: var(--ink); }
+#menu.hidden { display: none; }
+#menu button { font: inherit; color: inherit; cursor: pointer; }
+#menu kbd { font-size: .85em; }
+
+/* While the title screen is up the HUD stays out of the way. */
+body.on-title #hud { display: none; }
+body.menu-open #hud { filter: saturate(.7); }
+
+/* ---- title */
+#menu.s-title, #menu.s-settings:not(.ingame), #menu.s-confirm:not(.ingame) {
+  background:
+    radial-gradient(120% 90% at 78% 55%, rgba(11, 6, 20, 0) 0%, rgba(11, 6, 20, .35) 70%),
+    linear-gradient(90deg, rgba(11, 6, 20, .86) 0%, rgba(11, 6, 20, .55) 38%, rgba(11, 6, 20, .08) 72%);
+}
+#menu.s-pause, #menu.s-settings.ingame, #menu.s-confirm.ingame { background: rgba(11, 6, 20, .62); backdrop-filter: blur(3px); }
+
+.m-title { position: absolute; left: clamp(28px, 8vw, 150px); top: 50%; transform: translateY(-50%); width: min(820px, 90vw); }
+.m-title .m-list { width: min(520px, 100%); }
+.logo h1 {
+  margin: 0; font-weight: 600; font-size: clamp(48px, 7vw, 110px); line-height: 1; letter-spacing: .01em; white-space: nowrap;
+  color: #ffd9a0; text-shadow: 0 0 22px rgba(255, 170, 80, .55), 0 4px 0 rgba(120, 60, 20, .5);
+  animation: bob 5s ease-in-out infinite;
+}
+.logo p { margin: 10px 0 34px 6px; font-family: "Caveat", "Fredoka", cursive; font-size: clamp(22px, 2.4vw, 32px); color: var(--ink-dim); }
+@keyframes bob { 50% { transform: translateY(-5px); } }
+.loading { margin: -10px 0 18px 6px; color: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+.ver { position: absolute; left: 20px; bottom: 14px; font-size: 13px; color: var(--ink-dim); opacity: .7; }
+
+.m-list { display: flex; flex-direction: column; gap: 10px; }
+.m-item {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 18px; text-align: left;
+  padding: 13px 22px; border-radius: 14px; font-size: 24px; letter-spacing: .01em;
+  background: rgba(36, 22, 56, .55); border: 2px solid rgba(255, 190, 110, .18);
+  transition: transform .12s, background .12s, border-color .12s;
+}
+.m-item small { font-size: 14px; color: var(--ink-dim); }
+.m-item.focus, .m-item:hover { background: rgba(255, 180, 84, .18); border-color: var(--accent); transform: translateX(8px); }
+.m-card .m-item.focus, .m-card .m-item:hover { transform: none; }
+.m-item.off { opacity: .45; cursor: default; }
+.m-item.off.focus { transform: none; }
+
+.m-foot { margin-top: 22px; color: var(--ink-dim); font-size: 14px; display: flex; justify-content: space-between; align-items: center; gap: 14px; }
+.m-foot.hint { justify-content: flex-start; }
+
+.motes { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.mote {
+  position: absolute; bottom: -20px; border-radius: 50%; background: #ffe2a8; box-shadow: 0 0 10px 2px rgba(255, 200, 120, .8);
+  opacity: 0; animation: rise linear infinite;
+}
+@keyframes rise { 0% { transform: translate(0, 0); opacity: 0; } 12% { opacity: .85; } 80% { opacity: .5; } 100% { transform: translate(40px, -105vh); opacity: 0; } }
+
+/* ---- cards (pause, confirm, settings) */
+.m-card {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(440px, 92vw); padding: 24px 26px 22px; border-radius: 20px;
+  background: rgba(24, 14, 38, .92); border: 1px solid var(--panel-edge); box-shadow: 0 14px 60px rgba(0, 0, 0, .55);
+}
+.m-card.wide { width: min(760px, 94vw); max-height: 92vh; display: flex; flex-direction: column; }
+.m-card h2 { margin: 0 0 16px; font-weight: 600; font-size: 28px; color: var(--accent); }
+.m-card .warn { margin: -4px 0 16px; color: var(--ink-dim); }
+
+.m-tabs { display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid rgba(255, 255, 255, .1); }
+.m-tabs .tab {
+  background: none; border: none; border-bottom: 3px solid transparent; padding: 8px 16px; font-size: 18px; color: var(--ink-dim);
+}
+.m-tabs .tab:hover { color: var(--ink); }
+.m-tabs .tab.on { color: var(--accent); border-bottom-color: var(--accent); }
+
+.m-rows { overflow-y: auto; padding-right: 4px; }
+.row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 10px 14px; border-radius: 12px; border: 2px solid transparent; cursor: pointer;
+}
+.row.focus { background: rgba(255, 180, 84, .13); border-color: rgba(255, 180, 84, .55); }
+.row .lbl { font-size: 18px; }
+.row .lbl small { display: block; font-size: 13px; color: var(--ink-dim); margin-top: 1px; }
+.ctl { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+.ctl .arrow { font-size: 24px; line-height: 1; padding: 0 6px; color: var(--ink-dim); cursor: pointer; user-select: none; }
+.ctl .arrow:hover { color: var(--accent); }
+.notches { display: inline-flex; gap: 4px; }
+.notch { width: 13px; height: 22px; border-radius: 4px; background: rgba(255, 255, 255, .12); cursor: pointer; display: block; }
+.notch.on { background: linear-gradient(#ffcf8a, #ff9d4a); box-shadow: 0 0 8px rgba(255, 170, 80, .45); }
+.notch:hover { background: rgba(255, 200, 130, .5); }
+.val { min-width: 52px; text-align: right; color: var(--accent); font-weight: 500; }
+.val.wide { min-width: 150px; text-align: center; }
+.pill {
+  display: inline-block; min-width: 86px; text-align: center; padding: 5px 16px; border-radius: 999px;
+  background: rgba(255, 255, 255, .1); color: var(--ink-dim); font-weight: 500;
+}
+.pill.on { background: var(--accent); color: #2a1608; }
+.pill.btn { background: rgba(180, 140, 255, .25); color: var(--ink); }
+
+.ctrls { padding: 4px 6px 0; }
+.crow { display: flex; justify-content: space-between; gap: 18px; padding: 8px 8px; border-bottom: 1px solid rgba(255, 255, 255, .07); }
+.crow span:first-child { color: var(--ink-dim); }
+.crow kbd { margin-left: 4px; }
+.soon { margin: 14px 8px 0; color: var(--ink-dim); font-size: 14px; font-style: italic; }
+
+.m-back {
+  padding: 8px 26px; border-radius: 999px; font-size: 17px; background: rgba(255, 255, 255, .1); border: 1px solid rgba(255, 255, 255, .18);
+}
+.m-back:hover { background: rgba(255, 180, 84, .25); border-color: var(--accent); }

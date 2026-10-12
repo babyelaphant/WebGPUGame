@@ -23,6 +23,8 @@ pub enum Sfx {
     Rune(u8),
     /// Passing through a gate between areas.
     Gate,
+    /// The journal learned something (a pencil scratch and a tiny bell).
+    Clue,
     /// The weather just started changing to this.
     Weather(Weather),
 }
@@ -49,6 +51,7 @@ impl Sfx {
             Sfx::Rune(2) => "rune2",
             Sfx::Rune(_) => "rune3",
             Sfx::Gate => "gate",
+            Sfx::Clue => "clue",
             Sfx::Weather(Weather::Clear) => "weather_clear",
             Sfx::Weather(Weather::Fog) => "weather_fog",
             Sfx::Weather(Weather::Rain) => "weather_rain",
@@ -77,10 +80,14 @@ mod tests {
         let all = [
             Sfx::Step, Sfx::Pickup, Sfx::Drop, Sfx::Munch, Sfx::Befriend, Sfx::Deposit, Sfx::Buy,
             Sfx::Lantern, Sfx::Puzzle, Sfx::Spot, Sfx::Flee, Sfx::Nope, Sfx::Ui,
-            Sfx::Rune(0), Sfx::Rune(1), Sfx::Rune(2), Sfx::Rune(3), Sfx::Gate,
+            Sfx::Rune(0), Sfx::Rune(1), Sfx::Rune(2), Sfx::Rune(3), Sfx::Gate, Sfx::Clue,
             Sfx::Weather(Weather::Clear), Sfx::Weather(Weather::Fog), Sfx::Weather(Weather::Rain),
         ];
         let js = include_str!("../assets/audio.js");
+        // The parameterised calls the browser layer makes besides plain Sfx names.
+        for api in ["sense(", "setVolumes("] {
+            assert!(js.contains(api), "assets/audio.js has no {api}");
+        }
         let mut seen = std::collections::HashSet::new();
         for s in all {
             assert!(seen.insert(s.name()), "duplicate name {}", s.name());

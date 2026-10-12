@@ -7,7 +7,9 @@
 //!     math, rng, mesh   - tiny math lib + placeholder mesh builder
 //!     data              - content tables (spirits, treats, upgrades) + save format
 //!     env               - day/night + weather
-//!     world             - the first area's layout
+//!     world             - the areas' layouts
+//!     settings          - player options (volume, pixel size...) + their text format
+//!     sketch            - the journal's little SVG drawings of each spirit
 //!     game              - all gameplay rules
 //!     scene             - game state -> meshes/camera/uniforms
 //!     hud               - game state -> HTML strings
@@ -24,6 +26,8 @@ mod math;
 mod mesh;
 mod rng;
 mod scene;
+mod settings;
+mod sketch;
 mod world;
 
 #[cfg(target_arch = "wasm32")]

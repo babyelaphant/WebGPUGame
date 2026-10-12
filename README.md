@@ -1,4 +1,4 @@
-# Spirit Collector
+# untitled-01 (working title: Spirit Collector)
 
 A cozy Halloween creature-collecting game. You're a ghost collector exploring an enchanted forest:
 find spirits, win them over with treats or little puzzles, bring them home, spend the candles they
@@ -39,7 +39,8 @@ Use a recent desktop **Chrome or Edge** (WebGPU, hardware acceleration on).
 | Space | Put the selected treat on the ground |
 | Q / R (or Tab) | Switch treat |
 | 1 / 2 / 3 / 4 / 5 | Buy upgrade (at the cottage) |
-| J | Spirit journal |
+| J | Spirit journal (A / D or the arrow keys turn the page) |
+| Esc | Pause menu: resume, settings, back to the title screen |
 | M | Mute / unmute sound |
 | F1 | Debug overlay |
 | F2 | Cycle weather *(debug)* |
@@ -87,11 +88,52 @@ Use a recent desktop **Chrome or Edge** (WebGPU, hardware acceleration on).
    and ring in order), then touch the stones in the same order. A new tune is picked every dawn.
    Friends who follow you come through the gate with you, but they can only be handed over at the cottage.
 
+   **Finding them.** You don't have to stumble onto spirits any more. Anything wild within about 18 steps of you
+   (more with a Brighter Lantern) gives itself away:
+
+   - a **soft chime** that comes faster and louder as you get closer and is panned toward the side it's on. Every
+     species has its own note, so you learn who's calling by ear. Ones you've never befriended chime brighter.
+   - **sparkles** rising from the spirit (new faces also send out a slow ring on the ground), and
+   - a small **compass hint** under the clock ("A faint shimmer to the north-east"). The dot is the spirit's colour.
+
+   All of it can be switched off in Settings -> Audio / Gameplay.
+
 3. **Lure or solve.** Set down the treat they like and wait. Shy ones bolt if you walk at them.
 4. **Bring them home.** Befriended spirits follow you. Walk into the cottage garden to hand them over.
 5. **Earn and upgrade.** Candles buy a brighter lantern (bigger light + lure range), faster boots, a bigger treat pouch.
 
 Progress saves automatically in your browser (localStorage).
+
+## The journal
+
+Press <kbd>J</kbd>. There's one page per area and a little drawing for every spirit that **fills in as you learn
+about it**. There are five notes per spirit (60 in all), and you learn them by playing:
+
+| Note | You learn it by... | What the sketch gains |
+| --- | --- | --- |
+| Seen | getting close enough to spot it | an ink silhouette and its name |
+| Habits | watching it for about 8 seconds | pencil outline + a face that shows its personality |
+| Favorite treat | seeing it come running for a treat | a doodle of the treat |
+| When it appears | seeing it fade away when the weather or hour changes | weather + time-of-day doodles |
+| Friend | bringing it home | full colour, blush and sparkles |
+
+A new note plays a pencil scratch and a toast, and the clock bar shows "new note!" until you open the book.
+Befriending a spirit teaches you all of it at once. Unfound spirits are dashed "?" boxes.
+
+## Title screen and settings
+
+The title screen ("untitled-01" for now: change `GAME_NAME` in `assets/menu.js`) shows the glade at golden hour with
+the camera drifting past your cottage. **Continue / Play**, **New game** (asks first) and **Settings**.
+Press <kbd>Esc</kbd> in the game for the pause menu; **Save & back to title** saves your progress.
+
+Settings (keyboard or mouse, saved in your browser):
+
+| Tab | Options |
+| --- | --- |
+| Audio | master / music / sound effects / ambience volume, sound on/off, spirit chimes |
+| Video | fullscreen, pixel size (Chunky / Normal / Fine), brightness, weather effects (Off / Subtle / Full), dark screen edges, interface size, show FPS |
+| Gameplay | hints & tutorial text, spirit shimmer & compass, hold-or-toggle running, reset to defaults |
+| Controls | the key list (rebinding is on the to-do list) |
 
 ## Code map
 
@@ -103,12 +145,17 @@ src/
   world.rs     the three areas: Hollow Glade, Graveyard Hollow, Willow Pond (seeded, deterministic)
   game.rs      all gameplay rules + tests (no rendering, no browser)
   scene.rs     game state -> placeholder meshes, camera, light/post uniforms
-  hud.rs       game state -> HTML for the DOM HUD
+  hud.rs       game state -> HTML for the DOM HUD (and the journal pages)
+  sketch.rs    the journal's SVG drawings, layered by what you've learned
+  settings.rs  player options + their text format (shared with assets/menu.js)
   math.rs, rng.rs, mesh.rs   tiny dependency-free helpers
   gfx.rs       wgpu renderer           (browser only)
   web.rs       canvas/input/loop/save  (browser only)
   shaders/     scene.wgsl (toon + lights + fog), post.wgsl (pixel upscale, rain, fog, vignette)
-index.html     canvas + CSS HUD
+index.html     canvas + CSS HUD + journal styling
+assets/
+  audio.js     synthesized sound (effects, chimes, ambience, music)
+  menu.js/css  title screen, pause menu, settings (plain DOM; the Rust side talks to it via window.gameMenu)
 ```
 
 Everything except `gfx.rs` and `web.rs` has **zero dependencies**, so the game rules are unit-tested
@@ -156,5 +203,8 @@ playable end to end with no art blockers. Plan:
 - [x] Audio: synthesized cozy soundscape (see below)
 - [x] Second area, gated by an upgrade: Graveyard Hollow, 4 new spirits, a rune-melody puzzle
 - [x] Third area: Willow Pond with water, a shed, 4 spirits and a lily-lamp puzzle
-- [ ] More spirits, journal with sketches
-- [ ] Gamepad support, settings menu
+- [x] Finding spirits: nearby chime + shimmer + compass hint
+- [x] Journal that fills in with sketches as you learn about each spirit
+- [x] Title screen + settings menu
+- [ ] More spirits
+- [ ] Key rebinding, gamepad support

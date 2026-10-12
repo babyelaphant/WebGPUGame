@@ -12,6 +12,7 @@ use crate::data::*;
 use crate::env::*;
 use crate::math::*;
 use crate::rng::Rng;
+use crate::settings::Settings;
 use crate::world::*;
 use std::collections::VecDeque;
 use std::f32::consts::TAU;
@@ -26,6 +27,10 @@ const TRAVEL_SECONDS: f32 = 1.2;
 const RUNE_STEP: f32 = 0.9;
 pub const MELODY_LEN: usize = 4;
 pub const N_LAMPS: usize = 4;
+/// How far away you can sense a spirit (shimmer, chime, compass hint). The lantern upgrade adds to it.
+const SENSE_BASE: f32 = 18.0;
+/// Seconds spent watching a spirit before the journal learns how it behaves.
+const WATCH_SECONDS: f32 = 8.0;
 
 /// Which upgrade opens the gate that leads to `to` (None = always open).
 pub fn gate_key(to: Area) -> Option<usize> {
@@ -66,6 +71,8 @@ pub enum Action {
     PrevTreat,
     Buy(usize),
     ToggleJournal,
+    /// Turn the journal to another area's page (-1 / +1).
+    JournalPage(i32),
     ToggleDebug,
     CycleWeather,
     HourShift(f32),
@@ -175,6 +182,28 @@ pub struct SourceState {
     pub timer: f32,
 }
 
+/// The nearest wild spirit you can sense but not necessarily see: drives the shimmer + compass hint.
+#[derive(Clone, Copy, Debug)]
+pub struct Sense {
+    pub def: usize,
+    pub dist: f32,
+    /// Unit vector (x,z) from you toward it. Up the screen is -z.
+    pub dir: Vec3,
+    /// 0 at the edge of your senses .. 1 right on top of it.
+    pub strength: f32,
+    /// You have never befriended this kind yet.
+    pub fresh: bool,
+}
+
+/// A soft chime request for the browser's audio engine (pitch depends on the species).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Cue {
+    pub note: u8,
+    pub near: f32,
+    pub pan: f32,
+    pub fresh: bool,
+}
+
 pub struct Toast {
     pub text: String,
     pub ttl: f32,
@@ -208,13 +237,23 @@ pub struct Game {
     pub time: f32,
     pub cam: Vec3,
     pub show_journal: bool,
+    /// Which area's page the journal is open to.
+    pub journal_page: usize,
+    /// Journal notes written since the journal was last opened.
+    pub journal_unread: u32,
     pub show_debug: bool,
+    pub settings: Settings,
+    pub sense: Option<Sense>,
+    /// Chime requests since the last frame; the browser layer drains this.
+    pub cues: Vec<Cue>,
     /// Set when `save` changed; the web layer persists it.
     pub dirty: bool,
     pub fps: f32,
     /// Sound events since the last frame; the browser layer drains this.
     pub sfx: Vec<Sfx>,
     follow_order: Vec<u32>,
+    watch: [f32; N_SPIRITS],
+    cue_timer: f32,
     trail: VecDeque<Vec3>,
     rng: Rng,
     spawn_timer: f32,
@@ -255,11 +294,18 @@ impl Game {
             time: 0.0,
             cam: start,
             show_journal: false,
+            journal_page: 0,
+            journal_unread: 0,
             show_debug: false,
+            settings: Settings::default(),
+            sense: None,
+            cues: Vec::new(),
             dirty: false,
             fps: 60.0,
             sfx: Vec::new(),
             follow_order: Vec::new(),
+            watch: [0.0; N_SPIRITS],
+            cue_timer: 0.4,
             trail: VecDeque::new(),
             rng,
             spawn_timer: 3.0,
@@ -276,6 +322,10 @@ impl Game {
     }
     pub fn lantern_radius(&self) -> f32 {
         9.0 + 3.0 * self.save.upgrades[0] as f32
+    }
+    /// How far you can sense a spirit before you can see it.
+    pub fn sense_radius(&self) -> f32 {
+        SENSE_BASE + 3.0 * self.save.upgrades[0] as f32
     }
     pub fn treat_cap(&self) -> u32 {
         5 + 3 * self.save.upgrades[2] as u32
@@ -364,7 +414,16 @@ impl Game {
             Action::Buy(i) => self.buy(i),
             Action::ToggleJournal => {
                 self.show_journal = !self.show_journal;
+                if self.show_journal {
+                    self.journal_unread = 0;
+                }
                 self.play(Sfx::Ui);
+            }
+            Action::JournalPage(d) => {
+                if self.show_journal {
+                    self.journal_page = (self.journal_page as i32 + d).rem_euclid(N_AREAS as i32) as usize;
+                    self.play(Sfx::Ui);
+                }
             }
             Action::ToggleDebug => self.show_debug = !self.show_debug,
             Action::CycleWeather => {
@@ -574,6 +633,73 @@ impl Game {
         self.toast(format!("{} upgraded to level {}!", up.name, lvl + 1));
     }
 
+    /// Writes a new note in the journal (once), with a toast and a pencil-scratch sound.
+    pub fn learn(&mut self, def: usize, clue: Clue) {
+        // You can only learn about a spirit you have laid eyes on.
+        if matches!(clue, Clue::Habits | Clue::Likes | Clue::When) && !self.save.knows(def, Clue::Seen) {
+            return;
+        }
+        if !self.save.learn(def, clue) {
+            return;
+        }
+        self.dirty = true;
+        self.journal_unread += 1;
+        let d = &SPIRITS[def];
+        let msg = match clue {
+            Clue::Seen => return, // the "You spot something" toast covers this one
+            Clue::Habits => format!("You're getting to know how {} behaves.", d.name),
+            Clue::Likes => format!("{} came running for {}!", d.name, TREATS[d.favorite].name),
+            Clue::When => format!("{} faded away. Now you know when to find it.", d.name),
+            Clue::Friend => return,
+        };
+        self.toast(format!("📖 {msg}"));
+        self.play(Sfx::Clue);
+    }
+
+    /// Finds the nearest wild spirit within your senses and, now and then, asks for a soft chime:
+    /// faster the closer you get, panned toward where it is, pitched by species.
+    fn update_sense(&mut self, dt: f32) {
+        self.sense = None;
+        if self.travel.is_some() {
+            return;
+        }
+        let pp = self.player.pos;
+        let radius = self.sense_radius();
+        let mut best: Option<(f32, usize, Vec3)> = None;
+        for s in &self.spirits {
+            if matches!(s.state, SpState::Follow | SpState::Leaving) || s.fade < 0.3 {
+                continue;
+            }
+            let dist = s.pos.dist_xz(pp);
+            if dist < radius && best.map_or(true, |(b, _, _)| dist < b) {
+                best = Some((dist, s.def, s.pos));
+            }
+        }
+        let Some((dist, def, pos)) = best else {
+            self.cue_timer = self.cue_timer.min(0.4);
+            return;
+        };
+        let off = (pos - pp).with_y(0.0);
+        let dir = if off.length() > 0.01 { off.normalized() } else { Vec3::new(0.0, 0.0, -1.0) };
+        let strength = (1.0 - dist / radius).clamp(0.0, 1.0);
+        let fresh = !self.save.discovered[def];
+        self.sense = Some(Sense { def, dist, dir, strength, fresh });
+
+        // Spirits already coming for a treat don't need to call for attention.
+        let engaged = self
+            .spirits
+            .iter()
+            .any(|s| s.def == def && matches!(s.state, SpState::Approach(_) | SpState::Eat(..)) && s.pos.dist_xz(pp) < 8.0);
+        self.cue_timer -= dt;
+        if self.cue_timer <= 0.0 {
+            let calm = if fresh { 1.0 } else { 1.6 };
+            self.cue_timer = (4.4 - 3.4 * strength) * calm;
+            if self.settings.chimes && !engaged && self.cues.len() < 4 {
+                self.cues.push(Cue { note: def as u8, near: strength, pan: dir.x.clamp(-1.0, 1.0) * 0.8, fresh });
+            }
+        }
+    }
+
     fn alloc_id(&mut self) -> u32 {
         self.next_id += 1;
         self.next_id
@@ -603,6 +729,7 @@ impl Game {
         self.update_trail();
         self.update_spawner(dt);
         self.update_spirits(dt);
+        self.update_sense(dt);
         self.update_drops(dt);
         self.update_sources(dt);
         self.update_deposit(dt);
@@ -946,12 +1073,21 @@ impl Game {
             // Conditions ended (weather turned, night is over): wild spirits drift away.
             if !d.active(hour, weather) && !matches!(s.state, SpState::Follow | SpState::Leaving) {
                 s.state = SpState::Leaving;
+                if dist < 24.0 && s.fade > 0.5 {
+                    self.learn(s.def, Clue::When);
+                }
             }
-            if dist < 9.0 && !self.save.seen[s.def] {
-                self.save.seen[s.def] = true;
-                self.dirty = true;
+            if dist < 9.0 && !self.save.knows(s.def, Clue::Seen) {
+                self.learn(s.def, Clue::Seen);
                 self.toast(format!("You spot something: {}!", d.name));
                 self.play(Sfx::Spot);
+            }
+            // Watching a spirit for a while teaches you how it behaves.
+            if dist < 11.0 && s.fade > 0.5 && !matches!(s.state, SpState::Follow | SpState::Leaving) && self.save.knows(s.def, Clue::Seen) {
+                self.watch[s.def] += dt;
+                if self.watch[s.def] >= WATCH_SECONDS {
+                    self.learn(s.def, Clue::Habits);
+                }
             }
 
             let st = s.state;
@@ -963,6 +1099,7 @@ impl Game {
                         self.play(Sfx::Flee);
                     } else if let Some(tid) = self.find_lure(&s, d, lure_r, dist, still) {
                         s.state = SpState::Approach(tid);
+                        self.learn(s.def, Clue::Likes);
                     } else {
                         self.wander(&mut s, d, dist, pp, dt);
                     }
@@ -1000,6 +1137,7 @@ impl Game {
                         self.drops.retain(|x| x.id != tid);
                         s.state = SpState::Follow;
                         self.follow_order.push(s.id);
+                        self.save.learn(s.def, Clue::Likes);
                         self.play(Sfx::Befriend);
                         self.bursts.push(Burst { pos: s.pos, age: 0.0, color: d.color });
                         self.toast(format!("{} likes you now! Bring them home.", d.name));
@@ -1081,8 +1219,10 @@ impl Game {
         self.save.candles += d.reward;
         self.save.residents[s.def] += 1;
         let first = !self.save.discovered[s.def];
-        self.save.discovered[s.def] = true;
         self.save.seen[s.def] = true;
+        if self.save.learn(s.def, Clue::Friend) {
+            self.journal_unread += 1;
+        }
         self.dirty = true;
         self.deposit_cd = 0.8;
         self.bursts.push(Burst { pos: s.pos, age: 0.0, color: d.color });
@@ -1927,6 +2067,165 @@ mod tests {
             }
         }
         panic!("unsolvable");
+    }
+
+    /// Counts the chime requests over `seconds`, keeping the spirit exactly where it is.
+    fn chimes_while_pinned(g: &mut Game, id: u32, at: Vec3, seconds: f32) -> Vec<Cue> {
+        let mut all = Vec::new();
+        for _ in 0..(seconds / STEP) as usize {
+            g.update(STEP, &still());
+            if let Some(s) = g.spirits.iter_mut().find(|s| s.id == id) {
+                s.pos = at;
+            }
+            all.extend(g.cues.drain(..));
+        }
+        all
+    }
+
+    #[test]
+    fn nearby_spirits_shimmer_and_chime_faster_as_you_get_closer() {
+        let mut g = Game::new(Save::default(), 21);
+        g.env.hour = 19.0; // Pip's evening, clear weather
+        g.spawn_timer = 1e9;
+        let pp = g.player.pos;
+
+        // Far off to the east: out of sight, inside your senses.
+        let far_at = pp + Vec3::new(16.0, 0.0, 0.0);
+        let id = g.spawn_spirit(0, far_at);
+        let far = chimes_while_pinned(&mut g, id, far_at, 20.0);
+        let sn = g.sense.expect("Pip is within your senses");
+        assert_eq!(sn.def, 0);
+        assert!(sn.fresh, "never befriended yet");
+        assert!(sn.dir.x > 0.95 && sn.strength > 0.0 && sn.strength < 0.3, "{sn:?}");
+        assert_eq!(crate::hud::compass_index(sn.dir), 2, "east");
+        assert!(far.len() >= 3, "a faint call every few seconds: {}", far.len());
+        assert!(far.iter().all(|c| c.note == 0 && c.fresh && c.pan > 0.5), "{:?}", far[0]);
+
+        // Closer: calls come faster and louder.
+        let near_at = pp + Vec3::new(5.0, 0.0, 0.0);
+        let near = chimes_while_pinned(&mut g, id, near_at, 20.0);
+        assert!(near.len() > far.len() + 2, "near {} vs far {}", near.len(), far.len());
+        assert!(near.last().unwrap().near > far[0].near);
+
+        // The chimes can be turned off; the shimmer/compass still know.
+        g.settings.chimes = false;
+        assert!(chimes_while_pinned(&mut g, id, near_at, 8.0).is_empty());
+        assert!(g.sense.is_some());
+        g.settings.chimes = true;
+
+        // Out of range: nothing.
+        let way_off = pp + Vec3::new(40.0, 0.0, 0.0);
+        assert!(chimes_while_pinned(&mut g, id, way_off, 3.0).is_empty());
+        assert!(g.sense.is_none());
+
+        // A friend who follows you is not a "shimmer".
+        g.spirits.iter_mut().find(|s| s.id == id).unwrap().state = SpState::Follow;
+        assert!(chimes_while_pinned(&mut g, id, near_at, 6.0).is_empty());
+        assert!(g.sense.is_none());
+
+        // The Brighter Lantern widens your senses.
+        let base = g.sense_radius();
+        g.save.upgrades[0] = 2;
+        assert!(g.sense_radius() > base);
+    }
+
+    #[test]
+    fn a_spirit_already_coming_for_a_treat_does_not_keep_calling() {
+        let mut g = Game::new(Save::default(), 23);
+        g.env.hour = 19.0;
+        g.spawn_timer = 1e9;
+        let pp = g.player.pos;
+        let id = g.spawn_spirit(0, pp + Vec3::new(6.0, 0.0, 0.0));
+        g.selected = 0;
+        g.act(Action::DropTreat);
+        g.update(STEP, &still());
+        assert!(matches!(g.spirits.iter().find(|s| s.id == id).unwrap().state, SpState::Approach(_)));
+        g.cues.clear();
+        g.cue_timer = 0.0;
+        g.update(STEP, &still());
+        assert!(g.cues.is_empty(), "no chime for a spirit that is already eating out of your hand");
+    }
+
+    #[test]
+    fn the_journal_fills_in_by_watching_luring_and_seeing_a_spirit_fade() {
+        let mut g = Game::new(Save::default(), 22);
+        g.env.hour = 19.0;
+        g.spawn_timer = 1e9;
+        let pp = g.player.pos;
+        let near_at = pp + Vec3::new(6.0, 0.0, 0.0);
+        let id = g.spawn_spirit(0, near_at);
+        assert_eq!(g.save.pages(0), 0);
+
+        // 1. Laying eyes on it starts the page.
+        run(&mut g, 1.0, &still());
+        assert!(g.save.knows(0, Clue::Seen) && !g.save.knows(0, Clue::Habits));
+        assert_eq!(g.journal_unread, 1);
+
+        // 2. Watching for a while teaches you how it behaves.
+        chimes_while_pinned(&mut g, id, near_at, WATCH_SECONDS + 1.0);
+        assert!(g.save.knows(0, Clue::Habits), "watched for {WATCH_SECONDS}s");
+        assert!(g.toasts.iter().any(|t| t.text.contains("how Pumpkin Pip behaves")), "{:?}", g.toasts.iter().map(|t| &t.text).collect::<Vec<_>>());
+
+        // 3. Seeing it come running for a treat teaches you its favorite.
+        assert!(!g.save.knows(0, Clue::Likes));
+        g.selected = 0;
+        g.act(Action::DropTreat);
+        run(&mut g, 1.0, &still());
+        assert!(g.save.knows(0, Clue::Likes));
+        assert!(g.sfx.contains(&Sfx::Clue));
+
+        // 4. Seeing it fade away when the evening ends teaches you when it appears.
+        g.drops.clear();
+        g.spirits.iter_mut().find(|s| s.id == id).unwrap().state = SpState::Wander;
+        assert!(!g.save.knows(0, Clue::When));
+        g.env.hour = 12.0;
+        run(&mut g, 0.2, &still());
+        assert!(g.save.knows(0, Clue::When));
+        assert_eq!(g.save.pages(0), 4, "seen, habits, likes, when: only 'friend' left");
+        assert_eq!(g.journal_unread, 4);
+
+        // Opening the journal reads the notes; pages wrap around the areas.
+        g.act(Action::ToggleJournal);
+        assert_eq!(g.journal_unread, 0);
+        g.act(Action::JournalPage(-1));
+        assert_eq!(g.journal_page, N_AREAS - 1);
+        g.act(Action::JournalPage(1));
+        assert_eq!(g.journal_page, 0);
+    }
+
+    #[test]
+    fn you_cannot_learn_about_a_spirit_you_have_not_seen() {
+        let mut g = Game::new(Save::default(), 24);
+        g.env.hour = 19.0;
+        g.spawn_timer = 1e9;
+        // 20 away: sensed, but nowhere near close enough to see.
+        let id = g.spawn_spirit(0, g.player.pos + Vec3::new(17.0, 0.0, 0.0));
+        run(&mut g, 12.0, &still());
+        assert!(g.spirits.iter().any(|s| s.id == id));
+        assert!(!g.save.knows(0, Clue::Seen) && g.save.pages(0) == 0);
+        g.env.hour = 12.0;
+        run(&mut g, 1.0, &still());
+        assert_eq!(g.save.pages(0), 0, "a spirit you never saw teaches you nothing when it leaves");
+        g.learn(0, Clue::Likes);
+        assert_eq!(g.save.pages(0), 0);
+    }
+
+    #[test]
+    fn befriending_teaches_the_favorite_and_bringing_home_completes_the_page() {
+        let mut g = Game::new(Save::default(), 25);
+        g.env.hour = 19.0;
+        g.spawn_timer = 1e9;
+        let id = g.spawn_spirit(0, g.player.pos + Vec3::new(5.0, 0.0, 6.0));
+        g.selected = 0;
+        g.act(Action::DropTreat);
+        run(&mut g, 12.0, &still());
+        assert_eq!(g.spirits.iter().find(|s| s.id == id).unwrap().state, SpState::Follow);
+        assert!(g.save.knows(0, Clue::Likes) && g.save.knows(0, Clue::Seen));
+        assert!(!g.save.knows(0, Clue::Friend), "still on the way home");
+        g.player.pos = g.world.home + Vec3::new(0.0, 0.0, 5.0);
+        run(&mut g, 3.0, &still());
+        assert_eq!(g.save.pages(0), N_CLUES, "friendship fills in the whole page");
+        assert_eq!(g.save.journal_progress().0, N_CLUES);
     }
 
     #[test]

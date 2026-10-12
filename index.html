@@ -3,11 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Spirit Collector</title>
+  <title>untitled-01</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&family=Caveat:wght@500;700&display=swap" rel="stylesheet" />
   <link data-trunk rel="rust" data-wasm-opt="z" />
   <link data-trunk rel="copy-dir" href="assets" />
+  <link rel="stylesheet" href="assets/menu.css" />
   <style>
     :root {
       --ink: #f4ead8;
@@ -57,10 +58,51 @@
     .up small { display: block; color: var(--ink-dim); }
     kbd { background: rgba(255,255,255,.12); border-radius: 6px; padding: 1px 7px; font-family: inherit; }
 
-    #hud-journal { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 560px; max-height: 70vh; overflow: auto; }
-    #hud-journal .entry { padding: 8px 0; border-top: 1px solid rgba(255,255,255,.08); }
-    #hud-journal .entry small { color: var(--ink-dim); display: block; }
-    #hud-journal .area { margin-top: 10px; color: var(--accent-2); font-weight: 600; letter-spacing: .04em; }
+    /* Spirit journal: a notebook with one cream page per area */
+    #hud-journal {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: min(1100px, 95vw); max-height: 90vh; overflow: auto; padding: 16px 18px 18px;
+      background: linear-gradient(180deg, #3c2536, #2a1a2e); border-color: rgba(255, 190, 110, .45);
+    }
+    .book-head { display: flex; align-items: baseline; gap: 18px; margin-bottom: 10px; }
+    .book-head h3 { margin: 0; font-size: 26px; }
+    .book-head .keys { margin-left: auto; color: var(--ink-dim); font-size: 14px; }
+    .tabs { display: flex; gap: 6px; }
+    .tabs .tab { padding: 7px 16px; border-radius: 12px 12px 0 0; background: rgba(255, 255, 255, .07); color: var(--ink-dim); }
+    .tabs .tab small { opacity: .75; margin-left: 4px; }
+    .tabs .tab.on { background: #f6ecd2; color: #4a3a2c; font-weight: 600; }
+    .cards {
+      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 14px;
+      background: #f6ecd2; border-radius: 0 14px 14px 14px; color: #4a3a2c;
+    }
+    .card {
+      position: relative; padding: 10px 10px 12px; border-radius: 10px; background: #fffaf0;
+      border: 1px solid #e3d4ae; box-shadow: 0 2px 0 rgba(120, 90, 50, .16);
+    }
+    .card.complete::after {
+      content: "complete!"; position: absolute; bottom: 8px; right: 10px; transform: rotate(-6deg);
+      font: 700 20px "Caveat", cursive; color: #5a8f4a; border: 2px solid #5a8f4a; border-radius: 8px; padding: 0 8px; opacity: .85;
+    }
+    .card .sketch { width: 100%; max-width: 168px; margin: 0 auto; aspect-ratio: 1 / 1; }
+    .card .sketch svg { width: 100%; height: 100%; display: block; }
+    .card .nm { display: block; text-align: center; font-size: 18px; margin-top: 2px; }
+    .card .stars { text-align: center; color: #d79a2b; letter-spacing: 3px; font-size: 15px; }
+    .card.unseen .nm { color: #b9a584; }
+    .card.unseen .stars { color: #d9ccb0; }
+    .notes { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13.5px; line-height: 1.32; }
+    .notes li { padding: 5px 0; border-top: 1px dashed #e3d4ae; }
+    .notes .hint { font-style: italic; color: #7a6650; border-top: none; }
+    .notes .todo { color: #a89877; font: 500 17px/1.15 "Caveat", cursive; }
+    .notes .got em { color: #8a5a2a; }
+    .notes .dot { vertical-align: -1px; margin-right: 3px; box-shadow: none; }
+
+    #hud-sense { position: absolute; top: 88px; left: 16px; max-width: 360px; }
+    #hud-sense .arrow { display: inline-block; font-size: 22px; line-height: 1; color: var(--accent); margin-right: 4px; animation: pulse 2.2s ease-in-out infinite; }
+    #hud-book { font-size: 17px; font-weight: 500; display: flex; align-items: center; }
+    #hud-candles { display: flex; align-items: center; }
+    #hud-book .newnote { color: #ffe09a; animation: pulse 1.8s ease-in-out infinite; }
+    #hud-fps { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); font: 12px/1.2 ui-monospace, monospace; padding: 4px 10px; }
+    body.no-hints #hud-help { display: none; }
 
     #hud-debug { position: absolute; bottom: 16px; right: 16px; font: 12px/1.4 ui-monospace, monospace; white-space: pre; }
     #hud-help { position: absolute; right: 16px; bottom: 16px; color: var(--ink-dim); font-size: 12px; text-align: right; opacity: .75; }
@@ -77,7 +119,10 @@
     <div id="hud-top">
       <div class="panel" id="hud-clock"></div>
       <div class="panel" id="hud-candles"></div>
+      <div class="panel" id="hud-book"></div>
     </div>
+    <div class="panel" id="hud-sense"></div>
+    <div class="panel" id="hud-fps"></div>
     <div class="panel" id="hud-followers"></div>
     <div id="hud-toasts"></div>
     <div class="panel" id="hud-prompt"></div>
@@ -85,9 +130,11 @@
     <div class="panel" id="hud-shop"></div>
     <div class="panel" id="hud-journal"></div>
     <div class="panel" id="hud-debug"></div>
-    <div id="hud-help">WASD move · Shift run · E interact · Space drop treat · Q / R switch treat · J journal · M sound · F1 debug</div>
+    <div id="hud-help">WASD move · Shift run · E interact · Space drop treat · Q / R switch treat · J journal · M sound · Esc menu · F1 debug</div>
   </div>
+  <div id="menu" class="menu"></div>
   <div id="error"></div>
   <script src="assets/audio.js"></script>
+  <script src="assets/menu.js"></script>
 </body>
 </html>
