@@ -85,7 +85,7 @@ fn accent(id: &str) -> &'static str {
 fn unseen() -> String {
     "<svg class=\"sk\" viewBox=\"0 0 100 100\" xmlns=\"http://www.w3.org/2000/svg\">\
      <rect x=\"14\" y=\"14\" width=\"72\" height=\"72\" rx=\"12\" fill=\"none\" stroke=\"#b9a584\" stroke-width=\"2.4\" stroke-dasharray=\"5 6\" stroke-linecap=\"round\"/>\
-     <text x=\"50\" y=\"66\" text-anchor=\"middle\" font-size=\"46\" font-family=\"Caveat, cursive\" fill=\"#b9a584\">?</text></svg>"
+     <text x=\"50\" y=\"66\" text-anchor=\"middle\" font-size=\"46\" font-family=\"VT323, monospace\" fill=\"#b9a584\">?</text></svg>"
         .to_string()
 }
 

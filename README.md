@@ -8,6 +8,8 @@ earn you on upgrades, and push deeper into the woods.
 Looks like a chunky low-res "A Short Hike" scene (toon lighting, pixel-perfect upscale) with weather
 done in shaders.
 
+> UI: the "Candlelit" look (pixel fonts Press Start 2P + VT323, gold double-line windows) lives in the CSS of index.html and assets/menu.css.
+
 ## Run it (Windows / macOS / Linux)
 
 One-time setup:

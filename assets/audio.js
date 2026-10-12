@@ -331,7 +331,7 @@
             n = document.createElement('div');
             n.id = 'audio-note';
             n.style.cssText = 'position:fixed;left:50%;bottom:90px;transform:translateX(-50%);padding:6px 16px;' +
-              'border-radius:999px;background:rgba(24,14,38,.78);color:#f4ead8;font:15px Fredoka,system-ui,sans-serif;' +
+              'background:#1c1530;box-shadow:0 0 0 3px #1c1530,0 0 0 6px #e8b45a;color:#f6e6c4;font:20px VT323,monospace;' +
               'transition:opacity .4s;pointer-events:none;z-index:5';
             document.body.appendChild(n);
           }
