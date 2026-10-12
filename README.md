@@ -35,10 +35,10 @@ Use a recent desktop **Chrome or Edge** (WebGPU, hardware acceleration on).
 | --- | --- |
 | WASD / arrows | Move |
 | Shift | Run |
-| E | Interact: gather treats, light lanterns |
+| E | Interact: gather treats, light lanterns, use gates, touch crypt stones |
 | Space | Put the selected treat on the ground |
 | Q / R (or Tab) | Switch treat |
-| 1 / 2 / 3 | Buy upgrade (at the cottage) |
+| 1 / 2 / 3 / 4 / 5 | Buy upgrade (at the cottage) |
 | J | Spirit journal |
 | M | Mute / unmute sound |
 | F1 | Debug overlay |
@@ -47,7 +47,7 @@ Use a recent desktop **Chrome or Edge** (WebGPU, hardware acceleration on).
 
 ## How it plays
 
-1. **Explore.** Glowing plants grow treats (Candy Corn, Pumpkin Cookie, Moon Milk).
+1. **Explore.** Glowing plants grow treats (Candy Corn, Pumpkin Cookie, Moon Milk; Soul Cake grows in Graveyard Hollow and Lily Jam at Willow Pond).
 2. **Find spirits.** Who shows up depends on the **time of day and weather**:
 
    | Spirit | Appears | Likes | Personality |
@@ -56,6 +56,36 @@ Use a recent desktop **Chrome or Edge** (WebGPU, hardware acceleration on).
    | Mizzle | Rain, any time | Moon Milk | Playful |
    | Hush | Fog, any time | Pumpkin Cookie | Shy: stand still, a few steps back |
    | Luna, Lantern Queen | Clear nights (21:00-04:00) | Moon Milk | Only after you light the 3 lanterns in the far glade |
+
+   **Graveyard Hollow** (beyond the iron gate, once you buy the **Gate Key** at the cottage) has its own spirits,
+   and weather and time of day matter all over again:
+
+   | Spirit | Appears | Likes | Personality |
+   | --- | --- | --- | --- |
+   | Wick | Clear nights (18:00-05:00) | Soul Cake | Curious |
+   | Drip | Rain, any time | Pumpkin Cookie | Playful |
+   | Gloam | Fog, any time | Soul Cake | Shy |
+   | Old Marrow, Crypt Keeper | Nights (20:00-05:00) | Candy Corn | Only after you repeat the crypt's melody |
+
+   **Willow Pond** (the wooden reed gate at the south edge of the glade, opened by the **Frog Charm**) is a bright
+   forest around a pond, with a shed, a little pier and a rowboat. Its spirits keep daytime hours:
+
+   | Spirit | Appears | Likes | Personality |
+   | --- | --- | --- | --- |
+   | Bobbin | Clear days (06:00-19:00) | Lily Jam | Curious |
+   | Pondle | Rain, any time | Pumpkin Cookie | Playful |
+   | Reed | Fog, any time | Candy Corn | Shy |
+   | Lady Lotus, Pond Queen | Daylight, after the lily lamps | Moon Milk | Curious |
+
+   **The lily lamp puzzle:** four lamps stand in a row in front of the shed. Pressing <kbd>E</kbd> at a lamp flips it
+   *and its neighbours*; light all four. Every dawn the lamps are scrambled again (always solvable). You can't wade
+   into the pond, so walk around it.
+
+   **One of a kind:** Old Marrow and Lady Lotus never reappear once they live at your cottage.
+
+   **The crypt puzzle:** stand at the crypt door and press <kbd>E</kbd> to hear the melody (four rune stones light up
+   and ring in order), then touch the stones in the same order. A new tune is picked every dawn.
+   Friends who follow you come through the gate with you, but they can only be handed over at the cottage.
 
 3. **Lure or solve.** Set down the treat they like and wait. Shy ones bolt if you walk at them.
 4. **Bring them home.** Befriended spirits follow you. Walk into the cottage garden to hand them over.
@@ -70,7 +100,7 @@ src/
   main.rs      crate root + module map
   data.rs      <- spirits, treats, upgrades live here. Add content by editing tables.
   env.rs       day/night + weather -> lighting
-  world.rs     the "Hollow Glade" layout (seeded, deterministic)
+  world.rs     the three areas: Hollow Glade, Graveyard Hollow, Willow Pond (seeded, deterministic)
   game.rs      all gameplay rules + tests (no rendering, no browser)
   scene.rs     game state -> placeholder meshes, camera, light/post uniforms
   hud.rs       game state -> HTML for the DOM HUD
@@ -90,7 +120,7 @@ cargo test
 
 ### Adding a spirit
 
-Add an entry to `SPIRITS` in `src/data.rs` (bump `N_SPIRITS`). Pick its treat, weather, hours and
+Add an entry to `SPIRITS` in `src/data.rs` (bump `N_SPIRITS`). Pick its area (0 glade, 1 hollow), treat, weather, hours and
 personality. For a custom look, add a case in `draw_spirit` in `src/scene.rs`.
 
 ## Sound
@@ -124,6 +154,7 @@ playable end to end with no art blockers. Plan:
 - [x] Milestone 1: one glade, day/night, clear/fog/rain, 4 spirits, treat lures, lantern puzzle, cottage, 3 upgrades, saves
 - [ ] glTF loader + first Blender props
 - [x] Audio: synthesized cozy soundscape (see below)
-- [ ] Second area, gated by an upgrade (the "explore new areas" step of the loop)
-- [ ] More puzzle types, more spirits, journal with sketches
+- [x] Second area, gated by an upgrade: Graveyard Hollow, 4 new spirits, a rune-melody puzzle
+- [x] Third area: Willow Pond with water, a shed, 4 spirits and a lily-lamp puzzle
+- [ ] More spirits, journal with sketches
 - [ ] Gamepad support, settings menu

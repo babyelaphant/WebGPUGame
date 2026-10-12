@@ -148,6 +148,17 @@
       flee(t) { blip('triangle', 720, 300, t, 0.24, 0.09); },
       nope(t) { blip('sine', 230, 220, t, 0.12, 0.10); blip('sine', 200, 190, t + 0.12, 0.16, 0.09); },
       ui(t) { bell(mtof(96), t, 0.07, 0.25); },
+      // Graveyard Hollow: the four rune stones each have their own bell, and the gate creaks.
+      rune0(t) { bell(mtof(64), t, 0.20, 1.8); },
+      rune1(t) { bell(mtof(67), t, 0.20, 1.8); },
+      rune2(t) { bell(mtof(71), t, 0.20, 1.8); },
+      rune3(t) { bell(mtof(74), t, 0.20, 1.8); },
+      gate(t) {
+        blip('triangle', 150, 85, t, 0.55, 0.10);
+        puff(t, 0.5, 0.07, 700, 1.4);
+        swell([45, 52, 57], t + 0.1, 2.6, 0.06);
+        bell(mtof(81), t + 0.5, 0.10, 2.0);
+      },
       // Weather cues: gentle, but you will notice them.
       weather_clear(t) { [76, 79, 84].forEach((m, i) => bell(mtof(m), t + i * 0.14, 0.12, 2.0)); },
       weather_fog(t) {

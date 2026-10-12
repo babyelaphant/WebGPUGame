@@ -336,6 +336,16 @@ impl Renderer {
         }
     }
 
+    /// Replaces the static world geometry (used when you walk through a gate into another area).
+    pub fn set_static(&mut self, static_data: &[f32]) {
+        self.static_vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("static-vb"),
+            contents: bytemuck::cast_slice(static_data),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        self.static_count = (static_data.len() / FLOATS_PER_VERTEX) as u32;
+    }
+
     /// (low-res width, low-res height, integer pixel scale)
     pub fn low_res(&self) -> (u32, u32, u32) {
         (self.low.w, self.low.h, self.low.scale)

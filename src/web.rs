@@ -79,6 +79,8 @@ fn map_key(code: &str) -> Option<Action> {
         "Digit1" => Action::Buy(0),
         "Digit2" => Action::Buy(1),
         "Digit3" => Action::Buy(2),
+        "Digit4" => Action::Buy(3),
+        "Digit5" => Action::Buy(4),
         "KeyJ" => Action::ToggleJournal,
         "F1" => Action::ToggleDebug,
         "F2" => Action::CycleWeather,
@@ -154,6 +156,7 @@ async fn run() -> Result<(), String> {
     let static_mesh = scene::build_static(&game.world);
     let mut renderer = Renderer::new(canvas, &static_mesh.data).await?;
     let mut dyn_mesh = Mesh::new();
+    let mut shown_area = game.area;
 
     // ---- input
     let input = Rc::new(RefCell::new(InputState::default()));
@@ -252,7 +255,11 @@ async fn run() -> Result<(), String> {
             audio_bridge.set_ambience(&audio::ambience(&game));
         }
 
-        // Draw.
+        // Draw. (Walking through a gate swaps the static world while the screen is black.)
+        if game.area != shown_area {
+            shown_area = game.area;
+            renderer.set_static(&scene::build_static(&game.world).data);
+        }
         renderer.resize_if_needed();
         let (lw, lh, scale) = renderer.low_res();
         dyn_mesh.clear();

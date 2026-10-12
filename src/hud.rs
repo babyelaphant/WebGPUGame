@@ -4,6 +4,7 @@
 
 use crate::data::*;
 use crate::game::*;
+use crate::world::Area;
 
 fn hex(c: [f32; 3]) -> String {
     let f = |x: f32| (x.clamp(0.0, 1.0) * 255.0) as u8;
@@ -35,11 +36,12 @@ fn clock(g: &Game) -> String {
         None => String::new(),
     };
     format!(
-        "<b>{}</b>{} · {} {}<br><small>Day {}{}</small>",
+        "<b>{}</b>{} · {} {}<br><small>{} · Day {}{}</small>",
         fmt_hour(g.env.hour),
         g.env.phase_name(),
         g.env.weather.icon(),
         g.env.weather.name(),
+        g.area.name(),
         g.env.day,
         forecast
     )
@@ -76,6 +78,9 @@ fn hotbar(g: &Game) -> String {
 
 fn prompt(g: &Game) -> String {
     let mut lines: Vec<String> = Vec::new();
+    if g.travel.is_some() {
+        return String::new();
+    }
     if let Some(h) = g.interaction_hint() {
         lines.push(h);
     }
@@ -84,15 +89,22 @@ fn prompt(g: &Game) -> String {
         lines.push(format!("<b>{}</b><br><small>{}</small>", d.name, d.hint));
     }
     if g.time < 40.0 && lines.is_empty() {
-        lines.push(
+        lines.push(if g.area == Area::Hollow {
+            "<small>Soul Cake grows here. Some spirits only come out in the right weather, and the crypt hums a tune...</small>"
+                .to_string()
+        } else if g.area == Area::Pond {
+            "<small>Lily Jam grows here. Spirits keep daytime hours by the water, and the lamps by the shed look like a puzzle...</small>"
+                .to_string()
+        } else {
             "<small>Gather treats from the glowing plants (<kbd>E</kbd>), set one down (<kbd>Space</kbd>) \
              and wait nearby for hungry spirits.</small>"
-                .to_string(),
-        );
+                .to_string()
+        });
     }
     let n = g.followers().len();
     if n > 0 && !g.near_home() {
-        lines.push(format!("<small>{n} friend{} following. Bring them to the cottage!</small>", if n == 1 { "" } else { "s" }));
+        let way = if g.area == Area::Hollow { "Bring them back through the gate to the cottage!" } else { "Bring them to the cottage!" };
+        lines.push(format!("<small>{n} friend{} following. {way}</small>", if n == 1 { "" } else { "s" }));
     }
     lines.join("<br>")
 }
@@ -126,19 +138,31 @@ fn journal(g: &Game) -> String {
     for (i, d) in SPIRITS.iter().enumerate() {
         let body = if g.save.discovered[i] {
             format!(
-                "<b>{}</b> ×{}<small>Likes {} · Appears: {}</small><small>{}</small>",
+                "<b>{}</b> ×{}<small>Likes {} · Appears: {}</small><small>{}</small>{}",
                 d.name,
                 g.save.residents[i],
                 TREATS[d.favorite].name,
                 d.conditions_text(),
-                if d.needs_puzzle { "Wakes only when the glade's three lanterns are lit." } else { d.hint }
+                match (d.needs_puzzle, d.area) {
+                    (true, 0) => "Wakes only when the glade's three lanterns are lit.",
+                    (true, 1) => "Wakes only when the crypt's melody is repeated on the rune stones.",
+                    (true, _) => "Rises in daylight, once all four lily lamps by the shed glow.",
+                    _ => d.hint,
+                },
+                if d.unique { "<small>One of a kind: once it lives at your cottage, it never returns.</small>" } else { "" }
             )
         } else if g.save.seen[i] {
             format!("<b>{}</b><small>{}</small><small>Befriend it to learn more.</small>", d.name, d.hint)
         } else {
             "<b>???</b><small>Not yet seen.</small>".to_string()
         };
-        s.push_str(&format!("<div class=\"entry\">{}{}</div>", dot(d.color), body));
+        let place = if i == 0 || SPIRITS[i - 1].area != d.area {
+            let name = Area::ALL[d.area].name();
+            format!("<div class=\"area\">{name}</div>")
+        } else {
+            String::new()
+        };
+        s.push_str(&format!("{place}<div class=\"entry\">{}{}</div>", dot(d.color), body));
     }
     s
 }
@@ -161,14 +185,15 @@ fn debug(g: &Game) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::Vec3;
 
     #[test]
     fn hud_builds_for_every_panel_state() {
         let mut g = Game::new(Save::default(), 1);
         g.show_journal = true;
         g.show_debug = true;
-        g.save.seen = [true, true, false, false];
-        g.save.discovered = [true, false, false, false];
+        g.save.seen = [true, true, false, false, true, false, false, false, false, false, false, false];
+        g.save.discovered = [true, false, false, false, true, false, false, false, false, false, false, false];
         g.player.pos = g.world.home;
         let h = build(&g);
         let get = |k: &str| h.iter().find(|(id, _)| *id == k).unwrap().1.clone();
@@ -178,5 +203,46 @@ mod tests {
         assert!(get("hud-clock").contains("18:30"));
         assert!(!get("hud-clock").contains("approaching"));
         assert!(!get("hud-debug").is_empty());
+        assert!(get("hud-shop").contains("Gate Key") && get("hud-journal").contains("Graveyard Hollow"));
+        assert!(get("hud-clock").contains("Hollow Glade"));
+        assert!(get("hud-hotbar").contains("Soul Cake"));
+    }
+
+    #[test]
+    fn hollow_hud_has_no_shop_and_shows_gate_and_rune_prompts() {
+        let mut g = Game::new(Save::default(), 2);
+        g.save.upgrades[GATE_KEY] = 1;
+        g.enter_area(Area::Hollow);
+        let get = |g: &Game, k: &str| build(g).iter().find(|(id, _)| *id == k).unwrap().1.clone();
+        assert!(get(&g, "hud-clock").contains("Graveyard Hollow"));
+        assert!(get(&g, "hud-shop").is_empty());
+        g.player.pos = g.world.gate_to(Area::Glade).pos + Vec3::new(0.0, 0.0, -2.0);
+        assert!(get(&g, "hud-prompt").contains("Hollow Glade"), "{}", get(&g, "hud-prompt"));
+        g.player.pos = g.crypt_door();
+        assert!(get(&g, "hud-prompt").contains("Listen to the crypt"));
+        g.player.pos = g.world.runes[1] + Vec3::new(0.0, 0.0, 1.5);
+        assert!(get(&g, "hud-prompt").contains("Touch the stone"));
+        g.save.seen = [true; N_SPIRITS];
+        g.save.discovered = [true; N_SPIRITS];
+        g.show_journal = true;
+        assert!(get(&g, "hud-journal").contains("Old Marrow") && get(&g, "hud-journal").contains("One of a kind"));
+        assert!(get(&g, "hud-journal").contains("Willow Pond") && get(&g, "hud-journal").contains("Lady Lotus"));
+    }
+
+    #[test]
+    fn pond_hud_shows_lamp_prompt_and_both_glade_gates() {
+        let mut g = Game::new(Save::default(), 3);
+        g.save.upgrades[POND_KEY] = 1;
+        let get = |g: &Game, k: &str| build(g).iter().find(|(id, _)| *id == k).unwrap().1.clone();
+        g.player.pos = g.world.gate_to(Area::Pond).pos + Vec3::new(0.0, 0.0, -2.0);
+        assert!(get(&g, "hud-prompt").contains("Willow Pond"));
+        g.player.pos = g.world.gate_to(Area::Hollow).pos + Vec3::new(0.0, 0.0, 2.0);
+        assert!(get(&g, "hud-prompt").contains("Gate Key"));
+        g.player.pos = g.world.home;
+        assert!(get(&g, "hud-shop").contains("Frog Charm"));
+        g.enter_area(Area::Pond);
+        assert!(get(&g, "hud-clock").contains("Willow Pond"));
+        g.player.pos = g.world.lamps[2] + Vec3::new(0.0, 0.0, 1.5);
+        assert!(get(&g, "hud-prompt").contains("lamp 3"), "{}", get(&g, "hud-prompt"));
     }
 }

@@ -4,7 +4,7 @@
 struct Post {
     a: vec4<f32>, // low_w, low_h, scale, time
     b: vec4<f32>, // rain, fog, night, vignette
-    c: vec4<f32>, // fog color rgb
+    c: vec4<f32>, // fog color rgb, fade-to-black (a)
 };
 
 @group(0) @binding(0) var scene_tex: texture_2d<f32>;
@@ -88,5 +88,6 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
 
     let d = distance(uv, vec2<f32>(0.5, 0.5));
     col = col * (1.0 - vig * smoothstep(0.35, 0.95, d));
+    col = col * (1.0 - p.c.w);
     return vec4<f32>(col, 1.0);
 }

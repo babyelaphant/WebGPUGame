@@ -19,6 +19,10 @@ pub enum Sfx {
     Flee,
     Nope,
     Ui,
+    /// One of the four crypt rune stones (0..3) rings.
+    Rune(u8),
+    /// Passing through a gate between areas.
+    Gate,
     /// The weather just started changing to this.
     Weather(Weather),
 }
@@ -40,6 +44,11 @@ impl Sfx {
             Sfx::Flee => "flee",
             Sfx::Nope => "nope",
             Sfx::Ui => "ui",
+            Sfx::Rune(0) => "rune0",
+            Sfx::Rune(1) => "rune1",
+            Sfx::Rune(2) => "rune2",
+            Sfx::Rune(_) => "rune3",
+            Sfx::Gate => "gate",
             Sfx::Weather(Weather::Clear) => "weather_clear",
             Sfx::Weather(Weather::Fog) => "weather_fog",
             Sfx::Weather(Weather::Rain) => "weather_rain",
@@ -55,7 +64,7 @@ pub struct Ambience {
 }
 
 pub fn ambience(g: &Game) -> Ambience {
-    let l = g.env.lighting();
+    let l = g.lighting();
     Ambience { night: l.night, rain: l.rain, fog: l.fog_amt }
 }
 
@@ -68,6 +77,7 @@ mod tests {
         let all = [
             Sfx::Step, Sfx::Pickup, Sfx::Drop, Sfx::Munch, Sfx::Befriend, Sfx::Deposit, Sfx::Buy,
             Sfx::Lantern, Sfx::Puzzle, Sfx::Spot, Sfx::Flee, Sfx::Nope, Sfx::Ui,
+            Sfx::Rune(0), Sfx::Rune(1), Sfx::Rune(2), Sfx::Rune(3), Sfx::Gate,
             Sfx::Weather(Weather::Clear), Sfx::Weather(Weather::Fog), Sfx::Weather(Weather::Rain),
         ];
         let js = include_str!("../assets/audio.js");
