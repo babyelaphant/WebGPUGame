@@ -93,8 +93,6 @@ Use a recent desktop **Chrome or Edge** (WebGPU, hardware acceleration on).
    **Finding them.** You don't have to stumble onto spirits any more. Anything wild within about 18 steps of you
    (more with a Brighter Lantern) gives itself away:
 
-   - a **soft chime** that comes faster and louder as you get closer and is panned toward the side it's on. Every
-     species has its own note, so you learn who's calling by ear. Ones you've never befriended chime brighter.
    - **sparkles** rising from the spirit (new faces also send out a slow ring on the ground), and
    - a small **compass hint** under the clock ("A faint shimmer to the north-east"). The dot is the spirit's colour.
 
@@ -132,7 +130,7 @@ Settings (keyboard or mouse, saved in your browser):
 
 | Tab | Options |
 | --- | --- |
-| Audio | master / music / sound effects / ambience volume, sound on/off, spirit chimes |
+| Audio | master / music / sound effects / ambience volume, sound on/off |
 | Video | fullscreen, pixel size (Chunky / Normal / Fine), brightness, weather effects (Off / Subtle / Full), dark screen edges, interface size, show FPS |
 | Gameplay | hints & tutorial text, spirit shimmer & compass, hold-or-toggle running, reset to defaults |
 | Controls | the key list (rebinding is on the to-do list) |
@@ -158,7 +156,7 @@ src/
   shaders/     scene.wgsl (toon + lights + fog), post.wgsl (pixel upscale, rain, fog, vignette)
 index.html     canvas + CSS HUD + journal styling
 assets/
-  audio.js     synthesized sound (effects, chimes, ambience, music)
+  audio.js     synthesized sound (effects, ambience, music)
   menu.js/css  title screen, pause menu, settings (plain DOM; the Rust side talks to it via window.gameMenu)
 ```
 
@@ -204,8 +202,12 @@ playable end to end with no art blockers. Plan:
   self-lit (lantern flames, windows). Export: File > Export > glTF 2.0 > **.glb**, with
   *Attributes > Vertex Color* (Active) and *Apply Modifiers* on, then drop the file in `assets/models/`.
   No textures, skins or animations yet.
-- **Without Blender:** `python3 tools/make_player.py` and `python3 tools/make_spirits.py` regenerate the
-  player and the 12 spirit models (`assets/models/spirit_<id>.glb`) from code.
+- **Without Blender:** `python3 tools/make_player.py`, `make_spirits.py` and `make_props.py` regenerate the
+  player, the 12 spirit models (`assets/models/spirit_<id>.glb`) and the environment (`prop_<name>.glb`: trees,
+  rocks, mushrooms, graves, bushes, cottage, crypt, shed, gates, pond props) from code.
+- **Environment props:** each is placed by `put()` in `scene.rs`. A part whose name starts with `tint` has its colour
+  multiplied by a per-instance colour (leaf colour, rock tone, mushroom cap, berries), so one model gives many looks.
+  If a prop file is missing or broken the old primitive version is drawn instead.
 - **Idle animation:** a model is split into parts (one Blender object / glTF node each, origin = pivot) and the
   game animates a part by its **name** (`part_xf_opt` in `scene.rs`): `flap_l/_r`, `flaplow_l/_r` (moth wings),
   `bat_l/_r`, `fin_l/_r`, `twitch_l/_r` (ears, whiskers), `flicker` (flames), `sway`, `sway2_l/_r`, `bob`,
@@ -219,11 +221,12 @@ playable end to end with no art blockers. Plan:
 - [x] Milestone 1: one glade, day/night, clear/fog/rain, 4 spirits, treat lures, lantern puzzle, cottage, 3 upgrades, saves
 - [x] glTF loader + player model
 - [x] 12 spirit models with idle animations
-- [ ] More Blender props (cottage, trees, gravestones)
+- [x] Environment props (trees, rocks, mushrooms, graves, bushes, buildings, pond) as models
+- [ ] Replace the lamps, gate doors and water with models too
 - [x] Audio: synthesized cozy soundscape (see below)
 - [x] Second area, gated by an upgrade: Graveyard Hollow, 4 new spirits, a rune-melody puzzle
 - [x] Third area: Willow Pond with water, a shed, 4 spirits and a lily-lamp puzzle
-- [x] Finding spirits: nearby chime + shimmer + compass hint
+- [x] Finding spirits: nearby shimmer + compass hint
 - [x] Journal that fills in with sketches as you learn about each spirit
 - [x] Title screen + settings menu
 - [ ] More spirits

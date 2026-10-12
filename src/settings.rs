@@ -22,8 +22,6 @@ pub struct Settings {
     pub vignette: bool,
     /// Tutorial-style hint lines (the "press E" prompts always stay).
     pub hints: bool,
-    /// Soft chimes when a spirit is nearby.
-    pub chimes: bool,
     /// Sparkles over nearby spirits + the little compass hint.
     pub shimmer: bool,
     pub show_fps: bool,
@@ -44,7 +42,6 @@ impl Default for Settings {
             weather_fx: 2,
             vignette: true,
             hints: true,
-            chimes: true,
             shimmer: true,
             show_fps: false,
             run_toggle: false,
@@ -100,7 +97,7 @@ impl Settings {
     pub fn serialize(&self) -> String {
         let b = |x: bool| x as u8;
         format!(
-            "master={}\nmusic={}\nsfx={}\nambience={}\nbrightness={}\nui_scale={}\npixel={}\nweather_fx={}\nvignette={}\nhints={}\nchimes={}\nshimmer={}\nfps={}\nrun_toggle={}\n",
+            "master={}\nmusic={}\nsfx={}\nambience={}\nbrightness={}\nui_scale={}\npixel={}\nweather_fx={}\nvignette={}\nhints={}\nshimmer={}\nfps={}\nrun_toggle={}\n",
             self.master,
             self.music,
             self.sfx,
@@ -111,7 +108,6 @@ impl Settings {
             self.weather_fx,
             b(self.vignette),
             b(self.hints),
-            b(self.chimes),
             b(self.shimmer),
             b(self.show_fps),
             b(self.run_toggle)
@@ -134,7 +130,6 @@ impl Settings {
                 "weather_fx" => s.weather_fx = num(v, 0, 2, s.weather_fx),
                 "vignette" => s.vignette = flag(v, s.vignette),
                 "hints" => s.hints = flag(v, s.hints),
-                "chimes" => s.chimes = flag(v, s.chimes),
                 "shimmer" => s.shimmer = flag(v, s.shimmer),
                 "fps" => s.show_fps = flag(v, s.show_fps),
                 "run_toggle" => s.run_toggle = flag(v, s.run_toggle),
@@ -164,7 +159,6 @@ mod tests {
             weather_fx: 1,
             vignette: false,
             hints: false,
-            chimes: false,
             shimmer: false,
             show_fps: true,
             run_toggle: true,

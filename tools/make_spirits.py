@@ -31,8 +31,8 @@ class Part:
         if e not in self.groups: self.groups[e] = G(self.name, e)
         return self.groups[e]
     def box(self, c, h, col, e=0): self.g(e).box(c, h, col)
-    def frustum(self, base, r0, r1, h, seg, col, e=0): self.g(e).frustum(base, r0, r1, h, seg, col)
-    def cone_to(self, base, r, tip, seg, col, e=0): self.g(e).cone_to(base, r, tip, seg, col)
+    def frustum(self, base, r0, r1, h, seg, col, e=0, rot0=0.0): self.g(e).frustum(base, r0, r1, h, seg, col, rot0)
+    def cone_to(self, base, r, tip, seg, col, e=0, rot0=0.0): self.g(e).cone_to(base, r, tip, seg, col, rot0)
     def ellipsoid(self, c, r, col, e=0, stacks=4, slices=7): self.g(e).ellipsoid(c, r, stacks, slices, col)
     def sphere(self, c, r, col, e=0, stacks=3, slices=6): self.g(e).sphere(c, r, col, stacks, slices)
 

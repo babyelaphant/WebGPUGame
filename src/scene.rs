@@ -81,6 +81,42 @@ pub fn clear_color(game: &Game) -> [f32; 3] {
 
 // ------------------------------------------------------------------ static world
 
+/// Environment models (assets/models/prop_<name>.glb, built by tools/make_props.py or exported from
+/// Blender), parsed once. A missing or broken file makes `put` return false, and the caller draws the
+/// old primitive version instead.
+macro_rules! prop_files {
+    ($($n:literal),* $(,)?) => {
+        [$(($n, include_bytes!(concat!("../assets/models/prop_", $n, ".glb")) as &[u8])),*]
+    };
+}
+
+fn prop(name: &str) -> Option<&'static crate::gltf::Model> {
+    static PROPS: std::sync::OnceLock<Vec<(&'static str, Option<crate::gltf::Model>)>> = std::sync::OnceLock::new();
+    let all = PROPS.get_or_init(|| {
+        let files = prop_files![
+            "pine", "round", "dead", "willow", "rock0", "rock1", "rock2", "pebble", "shroom", "grave0", "grave1", "grave2",
+            "grave3", "bush_ready", "bush_empty", "pad", "pad_flower", "reed", "pier", "boat", "rune", "lantern_post",
+            "lily_post", "cottage", "crypt", "shed", "gate_stone", "gate_wood",
+        ];
+        files.iter().map(|(n, b)| (*n, crate::gltf::parse_glb(b).ok())).collect()
+    });
+    all.iter().find(|(n, _)| *n == name).and_then(|(_, m)| m.as_ref())
+}
+
+/// Draws a prop model at `pos`, turned by `yaw` and scaled by `scale`. Returns false if the model is
+/// not available so the caller can fall back to primitives.
+fn put(m: &mut Mesh, name: &str, pos: Vec3, yaw: f32, scale: Vec3, tint: Option<[f32; 3]>) -> bool {
+    let Some(model) = prop(name) else { return false };
+    m.set_xf(pos, yaw, scale);
+    m.add_model_tinted(model, tint);
+    m.reset_xf();
+    true
+}
+
+fn mul3(c: [f32; 3], k: f32) -> [f32; 3] {
+    [c[0] * k, c[1] * k, c[2] * k]
+}
+
 pub fn build_static(world: &World) -> Mesh {
     let mut m = Mesh::new();
     let hollow = world.area == Area::Hollow;
@@ -106,6 +142,27 @@ pub fn build_static(world: &World) -> Mesh {
     for t in &world.trees {
         let base = v(t.x, 0.0, t.z);
         let trunk = [0.27, 0.19, 0.16];
+        let yaw = t.tint * TAU;
+        let s = t.h / 4.0;
+        let done = match t.kind {
+            2 => put(&mut m, "dead", base, yaw, Vec3::new(s, s, s), None),
+            3 => {
+                let g = [0.24 + 0.06 * t.tint, 0.50 + 0.08 * t.tint, 0.36 + 0.05 * t.tint];
+                let s = t.h / 5.0;
+                put(&mut m, "willow", base, yaw, Vec3::new(s, s, s), Some(g))
+            }
+            0 => {
+                let g = [0.12 + 0.07 * t.tint, 0.28 + 0.10 * t.tint, 0.26 + 0.05 * t.tint];
+                put(&mut m, "pine", base, yaw, Vec3::new(s, s, s), Some(mul3(g, 1.1)))
+            }
+            _ => {
+                let crown = if t.tint < 0.5 { [0.85, 0.45, 0.15] } else { [0.45, 0.28, 0.55] };
+                put(&mut m, "round", base, yaw, Vec3::new(s, s, s), Some(mul3(crown, 1.0 / 0.87)))
+            }
+        };
+        if done {
+            continue;
+        }
         if t.kind == 2 {
             build_dead_tree(&mut m, t);
         } else if t.kind == 3 {
@@ -130,6 +187,10 @@ pub fn build_static(world: &World) -> Mesh {
 
     let rock_col = if hollow { [0.33, 0.33, 0.41] } else { [0.38, 0.37, 0.45] };
     for r in &world.rocks {
+        let variant = ((r.x * 7.3 + r.z * 3.1).abs() as usize) % 3;
+        if put(&mut m, ["rock0", "rock1", "rock2"][variant], v(r.x, 0.0, r.z), r.yaw, v(r.sx, r.sy, r.sz), Some(mul3(rock_col, 1.05))) {
+            continue;
+        }
         m.set_xf(v(r.x, 0.0, r.z), r.yaw, Vec3::ONE);
         m.ellipsoid(v(0.0, r.sy * 0.6, 0.0), v(r.sx, r.sy, r.sz), 3, 6, rock_col, 0.0);
     }
@@ -141,6 +202,9 @@ pub fn build_static(world: &World) -> Mesh {
         [[0.40, 0.90, 0.80], [0.90, 0.50, 0.90], [1.00, 0.60, 0.30]]
     };
     for s in &world.shrooms {
+        if put(&mut m, "shroom", v(s.x, 0.0, s.z), s.x * 3.7, v(s.s, s.s, s.s), Some(caps[s.hue as usize % 3])) {
+            continue;
+        }
         m.set_xf_u(v(s.x, 0.0, s.z), 0.0, s.s);
         m.cylinder(V0, 0.05, 0.25, 5, [0.9, 0.88, 0.8], 0.0);
         m.ellipsoid(v(0.0, 0.27, 0.0), v(0.2, 0.1, 0.2), 2, 6, caps[s.hue as usize % 3], 0.65);
@@ -154,6 +218,9 @@ pub fn build_static(world: &World) -> Mesh {
         }
         for (i, q) in world.runes.iter().enumerate() {
             // Stone column with a band in the rune's color (the gem on top is dynamic).
+            if put(&mut m, "rune", v(q.x, 0.0, q.z), 0.0, Vec3::ONE, Some(RUNE_COLORS[i])) {
+                continue;
+            }
             m.cylinder(v(q.x, 0.0, q.z), 0.55, 1.35, 6, [0.40, 0.40, 0.48], 0.0);
             m.cylinder(v(q.x, 0.0, q.z), 0.7, 0.22, 6, [0.34, 0.34, 0.42], 0.0);
             m.cylinder(v(q.x, 0.95, q.z), 0.58, 0.1, 6, RUNE_COLORS[i], 0.35);
@@ -163,6 +230,9 @@ pub fn build_static(world: &World) -> Mesh {
         build_shed(&mut m, world.shed);
         for l in &world.lamps {
             // Stone base and a green stem; the lily bloom on top is dynamic (it lights up).
+            if put(&mut m, "lily_post", v(l.x, 0.0, l.z), 0.0, Vec3::ONE, None) {
+                continue;
+            }
             m.cylinder(v(l.x, 0.0, l.z), 0.5, 0.25, 7, [0.40, 0.42, 0.46], 0.0);
             m.cylinder(v(l.x, 0.25, l.z), 0.07, 1.25, 5, [0.22, 0.42, 0.28], 0.0);
             m.cylinder(v(l.x, 0.9, l.z), 0.28, 0.06, 7, [0.25, 0.55, 0.30], 0.0);
@@ -171,6 +241,9 @@ pub fn build_static(world: &World) -> Mesh {
         build_cottage(&mut m, world.home);
         // Lantern posts in the glade (the lamp itself is dynamic: it lights up).
         for l in &world.lanterns {
+            if put(&mut m, "lantern_post", v(l.x, 0.0, l.z), 0.0, Vec3::ONE, None) {
+                continue;
+            }
             m.cylinder(v(l.x, 0.0, l.z), 0.32, 0.25, 8, [0.45, 0.45, 0.52], 0.0);
             m.cylinder(v(l.x, 0.25, l.z), 0.08, 1.95, 6, [0.20, 0.17, 0.22], 0.0);
         }
@@ -227,18 +300,29 @@ fn build_pond_ground(m: &mut Mesh, world: &World) {
     m.ellipsoid(v(w.x, 0.07, w.z), v(w.rx * 0.62, 0.03, w.rz * 0.62), 2, 24, [0.14, 0.34, 0.48], 0.1);
 
     for p in &world.pads {
+        if put(m, if p.flower { "pad_flower" } else { "pad" }, v(p.x, 0.09, p.z), p.x * 5.1, v(p.s, 1.0, p.s), None) {
+            continue;
+        }
         m.cylinder(v(p.x, 0.09, p.z), 0.55 * p.s, 0.03, 8, [0.22, 0.55, 0.28], 0.0);
         if p.flower {
             m.cone(v(p.x, 0.12, p.z), 0.2 * p.s, 0.3, 6, [1.0, 0.72, 0.86], 0.6);
         }
     }
     for r in &world.reeds {
+        if put(m, "reed", v(r.x, 0.0, r.z), r.x * 4.3, v(1.0, r.h, 1.0), None) {
+            continue;
+        }
         m.cylinder(v(r.x, 0.0, r.z), 0.04, r.h, 4, [0.35, 0.48, 0.26], 0.0);
         m.cylinder(v(r.x, r.h * 0.55, r.z), 0.095, r.h * 0.3, 5, [0.45, 0.28, 0.15], 0.0);
     }
 
     // A little pier on the west bank (it stays on dry ground), with a rowboat pulled up beside it.
     let px = w.x - w.rx - 0.8;
+    if prop("pier").is_some() && prop("boat").is_some() {
+        put(m, "pier", v(px, 0.0, w.z), 0.0, Vec3::ONE, None);
+        put(m, "boat", v(w.x - w.rx - 1.0, 0.0, w.z + 3.2), 0.5, Vec3::ONE, None);
+        return;
+    }
     for k in 0..7 {
         m.box_(v(px - 0.3 - k as f32 * 0.62, 0.3, w.z), v(0.3, 0.05, 0.95), [0.46, 0.33, 0.22], 0.0);
     }
@@ -269,6 +353,9 @@ fn build_willow(m: &mut Mesh, t: &Tree) {
 
 /// The shed by the pond: planked walls, a pyramid roof, a porch, firewood and a barrel.
 fn build_shed(m: &mut Mesh, s: Vec3) {
+    if put(m, "shed", s, 0.0, Vec3::ONE, None) {
+        return;
+    }
     let plank = [0.46, 0.31, 0.20];
     m.set_xf(s, 0.0, Vec3::ONE);
     m.box_(v(0.0, 0.12, 0.0), v(2.9, 0.12, 2.4), [0.33, 0.30, 0.28], 0.0); // stone footing
@@ -321,6 +408,10 @@ fn build_dead_tree(m: &mut Mesh, t: &Tree) {
 fn build_grave(m: &mut Mesh, g: &Grave) {
     let stone = 0.42 + 0.10 * ((g.x * 3.1 + g.z * 1.7).sin() * 0.5 + 0.5);
     let col = [stone, stone, stone + 0.07];
+    let names = ["grave0", "grave1", "grave2", "grave3"];
+    if put(m, names[(g.kind as usize).min(3)], v(g.x, 0.0, g.z), g.yaw, v(g.s, g.s, g.s), Some(mul3(col, 1.05))) {
+        return;
+    }
     m.set_xf_u(v(g.x, 0.0, g.z), g.yaw, g.s);
     // Mound of earth in front of the stone.
     m.ellipsoid(v(0.0, 0.05, 0.75), v(0.42, 0.12, 0.8), 2, 6, [0.22, 0.20, 0.20], 0.0);
@@ -347,6 +438,9 @@ fn build_grave(m: &mut Mesh, g: &Grave) {
 
 fn build_crypt(m: &mut Mesh, world: &World) {
     let c = world.crypt;
+    if put(m, "crypt", c, 0.0, Vec3::ONE, None) {
+        return;
+    }
     let stone = [0.37, 0.37, 0.44];
     m.set_xf(c, 0.0, Vec3::ONE);
     m.box_(v(0.0, 0.18, 0.0), v(3.9, 0.18, 3.1), [0.30, 0.30, 0.37], 0.0); // plinth
@@ -379,6 +473,16 @@ fn build_crypt(m: &mut Mesh, world: &World) {
 /// The gate to Willow Pond (and the one coming back out of it) is wooden; the rest are stone.
 fn build_gate(m: &mut Mesh, g: Vec3, here: Area, to: Area) {
     let wood = here == Area::Pond || to == Area::Pond;
+    let dark_tint = if wood {
+        [0.36, 0.25, 0.17]
+    } else if here == Area::Hollow {
+        [0.30, 0.30, 0.38]
+    } else {
+        [0.34, 0.34, 0.40]
+    };
+    if put(m, if wood { "gate_wood" } else { "gate_stone" }, g, 0.0, Vec3::ONE, Some(dark_tint)) {
+        return;
+    }
     let stone = if wood { [0.46, 0.33, 0.22] } else { [0.40, 0.40, 0.46] };
     let dark = if wood {
         [0.36, 0.25, 0.17]
@@ -409,6 +513,18 @@ fn build_gate(m: &mut Mesh, g: Vec3, here: Area, to: Area) {
 }
 
 fn build_cottage(m: &mut Mesh, h: Vec3) {
+    if put(m, "cottage", h, 0.0, Vec3::ONE, None) {
+        // A ring of little stones marking the garden where friends can be handed over.
+        for i in 0..26 {
+            let a = TAU * i as f32 / 26.0;
+            if a > 1.2 && a < 1.95 {
+                continue; // leave a gap at the front path
+            }
+            let k = 0.85 + 0.3 * (i as f32 * 1.9).sin().abs();
+            put(m, "pebble", v(h.x + a.cos() * 5.8, 0.0, h.z + a.sin() * 5.8), i as f32 * 2.3, v(k, k, k), None);
+        }
+        return;
+    }
     m.set_xf(h, 0.0, Vec3::ONE);
     m.box_(v(0.0, 1.3, 0.0), v(2.6, 1.3, 2.3), [0.58, 0.42, 0.36], 0.0);
     // Pyramid roof, turned 45 degrees to line up with the walls.
@@ -456,6 +572,18 @@ pub fn build_dynamic(game: &Game, m: &mut Mesh) {
     // Treat plants.
     for s in &game.sources {
         let tc = TREATS[s.treat].color;
+        if let Some(model) = prop(if s.ready { "bush_ready" } else { "bush_empty" }) {
+            m.set_xf(v(s.pos.x, 0.0, s.pos.z), s.pos.x * 2.9, Vec3::ONE);
+            for part in &model.parts {
+                let mut xf = part_xf(&part.name, t * 2.4);
+                if part.name.starts_with("tint") {
+                    xf.tint = Some(tc);
+                }
+                m.add_part(part, &xf);
+            }
+            m.reset_xf();
+            continue;
+        }
         if s.ready {
             m.ellipsoid(v(s.pos.x, 0.42, s.pos.z), v(0.85, 0.55, 0.85), 3, 7, [0.16, 0.34, 0.21], 0.0);
             for k in 0..4 {
@@ -825,6 +953,7 @@ fn part_xf_opt(name: &str, phase: f32) -> Option<PartXf> {
             let k = 1.0 + 0.2 * (phase * 0.9).sin().max(0.0).powi(3);
             x.scale = [k, k, k];
         }
+        "tintberry" => x.offset[1] = 0.04 * (phase * 0.83 + digit).sin(),
         "tail" => x.rot[1] = 0.35 * (phase * 3.0).sin(),
         _ => return None,
     }
@@ -990,6 +1119,49 @@ mod tests {
         for v in m.data.chunks(FLOATS_PER_VERTEX) {
             assert!((v[3] * v[3] + v[4] * v[4] + v[5] * v[5] - 1.0).abs() < 1e-2);
         }
+    }
+
+    #[test]
+    fn every_environment_model_loads_and_stays_cheap() {
+        // (name, has a tinted part, max triangles). Trees repeat 200+ times, so they must stay light.
+        let list: [(&str, bool, usize); 28] = [
+            ("pine", true, 120), ("round", true, 220), ("dead", false, 220), ("willow", true, 400),
+            ("rock0", true, 80), ("rock1", true, 120), ("rock2", true, 100), ("pebble", false, 30), ("shroom", true, 120),
+            ("grave0", true, 140), ("grave1", true, 100), ("grave2", true, 120), ("grave3", true, 80),
+            ("bush_ready", true, 220), ("bush_empty", false, 100), ("pad", false, 80), ("pad_flower", false, 160),
+            ("reed", false, 60), ("pier", false, 260), ("boat", false, 120), ("rune", true, 120),
+            ("lantern_post", false, 140), ("lily_post", false, 100), ("cottage", false, 1100), ("crypt", false, 700),
+            ("shed", false, 500), ("gate_stone", true, 400), ("gate_wood", true, 400),
+        ];
+        for (name, tinted, max_tris) in list {
+            let m = prop(name).unwrap_or_else(|| panic!("prop_{name}.glb should load"));
+            assert!(m.vertex_count() / 3 <= max_tris, "{name}: {} triangles", m.vertex_count() / 3);
+            assert!(m.vertex_count() > 30, "{name} looks empty");
+            assert_eq!(m.parts.iter().any(|p| p.name.starts_with("tint")), tinted, "{name} tint parts");
+            for v in m.data.chunks(FLOATS_PER_VERTEX) {
+                assert!(v.iter().all(|f| f.is_finite()));
+                assert!(v[1] > -0.7, "{name} sinks below the ground: {}", v[1]);
+            }
+        }
+    }
+
+    #[test]
+    fn tint_colours_only_the_tinted_parts() {
+        let mut m = Mesh::new();
+        put(&mut m, "pine", Vec3::ZERO, 0.0, Vec3::ONE, Some([1.0, 0.0, 0.0]));
+        let model = prop("pine").unwrap();
+        let trunk = model.parts.iter().find(|p| p.name == "body").unwrap().data.len() / FLOATS_PER_VERTEX;
+        // Trunk keeps its brown; leaves lose their green and blue.
+        let (mut brown, mut red) = (0, 0);
+        for v in m.data.chunks(FLOATS_PER_VERTEX) {
+            if v[7] == 0.0 && v[8] == 0.0 {
+                red += 1;
+            } else {
+                brown += 1;
+            }
+        }
+        assert_eq!(brown, trunk);
+        assert!(red > trunk);
     }
 
     #[test]

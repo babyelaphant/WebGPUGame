@@ -101,7 +101,7 @@ fn prompt(g: &Game) -> String {
                 .to_string()
         } else {
             "<small>Gather treats from the glowing plants (<kbd>E</kbd>), set one down (<kbd>Space</kbd>) \
-             and wait nearby for hungry spirits. A soft chime means one is close.</small>"
+             and wait nearby for hungry spirits.</small>"
                 .to_string()
         });
     }
@@ -202,7 +202,7 @@ fn card(g: &Game, i: usize) -> String {
     if !sv.knows(i, Clue::Seen) {
         return format!(
             "<div class=\"card unseen\"><div class=\"sketch\">{}</div><b class=\"nm\">???</b><div class=\"stars\">{}</div>\
-             <ul class=\"notes\"><li class=\"todo\">Not seen yet. Listen for soft chimes and look for a shimmer.</li></ul></div>",
+             <ul class=\"notes\"><li class=\"todo\">Not seen yet. Look for a faint shimmer.</li></ul></div>",
             sketch::sketch(i, sv),
             stars(0)
         );

@@ -27,7 +27,7 @@ const TRAVEL_SECONDS: f32 = 1.2;
 const RUNE_STEP: f32 = 0.9;
 pub const MELODY_LEN: usize = 4;
 pub const N_LAMPS: usize = 4;
-/// How far away you can sense a spirit (shimmer, chime, compass hint). The lantern upgrade adds to it.
+/// How far away you can sense a spirit (shimmer and compass hint). The lantern upgrade adds to it.
 const SENSE_BASE: f32 = 18.0;
 /// Seconds spent watching a spirit before the journal learns how it behaves.
 const WATCH_SECONDS: f32 = 8.0;
@@ -195,15 +195,6 @@ pub struct Sense {
     pub fresh: bool,
 }
 
-/// A soft chime request for the browser's audio engine (pitch depends on the species).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Cue {
-    pub note: u8,
-    pub near: f32,
-    pub pan: f32,
-    pub fresh: bool,
-}
-
 pub struct Toast {
     pub text: String,
     pub ttl: f32,
@@ -244,8 +235,6 @@ pub struct Game {
     pub show_debug: bool,
     pub settings: Settings,
     pub sense: Option<Sense>,
-    /// Chime requests since the last frame; the browser layer drains this.
-    pub cues: Vec<Cue>,
     /// Set when `save` changed; the web layer persists it.
     pub dirty: bool,
     pub fps: f32,
@@ -253,7 +242,6 @@ pub struct Game {
     pub sfx: Vec<Sfx>,
     follow_order: Vec<u32>,
     watch: [f32; N_SPIRITS],
-    cue_timer: f32,
     trail: VecDeque<Vec3>,
     rng: Rng,
     spawn_timer: f32,
@@ -299,13 +287,11 @@ impl Game {
             show_debug: false,
             settings: Settings::default(),
             sense: None,
-            cues: Vec::new(),
             dirty: false,
             fps: 60.0,
             sfx: Vec::new(),
             follow_order: Vec::new(),
             watch: [0.0; N_SPIRITS],
-            cue_timer: 0.4,
             trail: VecDeque::new(),
             rng,
             spawn_timer: 3.0,
@@ -656,9 +642,8 @@ impl Game {
         self.play(Sfx::Clue);
     }
 
-    /// Finds the nearest wild spirit within your senses and, now and then, asks for a soft chime:
-    /// faster the closer you get, panned toward where it is, pitched by species.
-    fn update_sense(&mut self, dt: f32) {
+    /// Finds the nearest wild spirit within your senses (drives the shimmer and the compass hint).
+    fn update_sense(&mut self) {
         self.sense = None;
         if self.travel.is_some() {
             return;
@@ -676,7 +661,6 @@ impl Game {
             }
         }
         let Some((dist, def, pos)) = best else {
-            self.cue_timer = self.cue_timer.min(0.4);
             return;
         };
         let off = (pos - pp).with_y(0.0);
@@ -684,20 +668,6 @@ impl Game {
         let strength = (1.0 - dist / radius).clamp(0.0, 1.0);
         let fresh = !self.save.discovered[def];
         self.sense = Some(Sense { def, dist, dir, strength, fresh });
-
-        // Spirits already coming for a treat don't need to call for attention.
-        let engaged = self
-            .spirits
-            .iter()
-            .any(|s| s.def == def && matches!(s.state, SpState::Approach(_) | SpState::Eat(..)) && s.pos.dist_xz(pp) < 8.0);
-        self.cue_timer -= dt;
-        if self.cue_timer <= 0.0 {
-            let calm = if fresh { 1.0 } else { 1.6 };
-            self.cue_timer = (4.4 - 3.4 * strength) * calm;
-            if self.settings.chimes && !engaged && self.cues.len() < 4 {
-                self.cues.push(Cue { note: def as u8, near: strength, pan: dir.x.clamp(-1.0, 1.0) * 0.8, fresh });
-            }
-        }
     }
 
     fn alloc_id(&mut self) -> u32 {
@@ -729,7 +699,7 @@ impl Game {
         self.update_trail();
         self.update_spawner(dt);
         self.update_spirits(dt);
-        self.update_sense(dt);
+        self.update_sense();
         self.update_drops(dt);
         self.update_sources(dt);
         self.update_deposit(dt);
@@ -2069,21 +2039,18 @@ mod tests {
         panic!("unsolvable");
     }
 
-    /// Counts the chime requests over `seconds`, keeping the spirit exactly where it is.
-    fn chimes_while_pinned(g: &mut Game, id: u32, at: Vec3, seconds: f32) -> Vec<Cue> {
-        let mut all = Vec::new();
+    /// Runs for `seconds`, keeping the spirit exactly where it is.
+    fn run_pinned(g: &mut Game, id: u32, at: Vec3, seconds: f32) {
         for _ in 0..(seconds / STEP) as usize {
             g.update(STEP, &still());
             if let Some(s) = g.spirits.iter_mut().find(|s| s.id == id) {
                 s.pos = at;
             }
-            all.extend(g.cues.drain(..));
         }
-        all
     }
 
     #[test]
-    fn nearby_spirits_shimmer_and_chime_faster_as_you_get_closer() {
+    fn nearby_spirits_are_sensed_and_the_compass_points_to_them() {
         let mut g = Game::new(Save::default(), 21);
         g.env.hour = 19.0; // Pip's evening, clear weather
         g.spawn_timer = 1e9;
@@ -2092,58 +2059,32 @@ mod tests {
         // Far off to the east: out of sight, inside your senses.
         let far_at = pp + Vec3::new(16.0, 0.0, 0.0);
         let id = g.spawn_spirit(0, far_at);
-        let far = chimes_while_pinned(&mut g, id, far_at, 20.0);
+        run_pinned(&mut g, id, far_at, 2.0);
         let sn = g.sense.expect("Pip is within your senses");
         assert_eq!(sn.def, 0);
         assert!(sn.fresh, "never befriended yet");
         assert!(sn.dir.x > 0.95 && sn.strength > 0.0 && sn.strength < 0.3, "{sn:?}");
         assert_eq!(crate::hud::compass_index(sn.dir), 2, "east");
-        assert!(far.len() >= 3, "a faint call every few seconds: {}", far.len());
-        assert!(far.iter().all(|c| c.note == 0 && c.fresh && c.pan > 0.5), "{:?}", far[0]);
 
-        // Closer: calls come faster and louder.
+        // Closer: the sense gets stronger.
         let near_at = pp + Vec3::new(5.0, 0.0, 0.0);
-        let near = chimes_while_pinned(&mut g, id, near_at, 20.0);
-        assert!(near.len() > far.len() + 2, "near {} vs far {}", near.len(), far.len());
-        assert!(near.last().unwrap().near > far[0].near);
-
-        // The chimes can be turned off; the shimmer/compass still know.
-        g.settings.chimes = false;
-        assert!(chimes_while_pinned(&mut g, id, near_at, 8.0).is_empty());
-        assert!(g.sense.is_some());
-        g.settings.chimes = true;
+        run_pinned(&mut g, id, near_at, 2.0);
+        assert!(g.sense.unwrap().strength > sn.strength);
 
         // Out of range: nothing.
         let way_off = pp + Vec3::new(40.0, 0.0, 0.0);
-        assert!(chimes_while_pinned(&mut g, id, way_off, 3.0).is_empty());
+        run_pinned(&mut g, id, way_off, 2.0);
         assert!(g.sense.is_none());
 
         // A friend who follows you is not a "shimmer".
         g.spirits.iter_mut().find(|s| s.id == id).unwrap().state = SpState::Follow;
-        assert!(chimes_while_pinned(&mut g, id, near_at, 6.0).is_empty());
+        run_pinned(&mut g, id, near_at, 2.0);
         assert!(g.sense.is_none());
 
         // The Brighter Lantern widens your senses.
         let base = g.sense_radius();
         g.save.upgrades[0] = 2;
         assert!(g.sense_radius() > base);
-    }
-
-    #[test]
-    fn a_spirit_already_coming_for_a_treat_does_not_keep_calling() {
-        let mut g = Game::new(Save::default(), 23);
-        g.env.hour = 19.0;
-        g.spawn_timer = 1e9;
-        let pp = g.player.pos;
-        let id = g.spawn_spirit(0, pp + Vec3::new(6.0, 0.0, 0.0));
-        g.selected = 0;
-        g.act(Action::DropTreat);
-        g.update(STEP, &still());
-        assert!(matches!(g.spirits.iter().find(|s| s.id == id).unwrap().state, SpState::Approach(_)));
-        g.cues.clear();
-        g.cue_timer = 0.0;
-        g.update(STEP, &still());
-        assert!(g.cues.is_empty(), "no chime for a spirit that is already eating out of your hand");
     }
 
     #[test]
@@ -2162,7 +2103,7 @@ mod tests {
         assert_eq!(g.journal_unread, 1);
 
         // 2. Watching for a while teaches you how it behaves.
-        chimes_while_pinned(&mut g, id, near_at, WATCH_SECONDS + 1.0);
+        run_pinned(&mut g, id, near_at, WATCH_SECONDS + 1.0);
         assert!(g.save.knows(0, Clue::Habits), "watched for {WATCH_SECONDS}s");
         assert!(g.toasts.iter().any(|t| t.text.contains("how Pumpkin Pip behaves")), "{:?}", g.toasts.iter().map(|t| &t.text).collect::<Vec<_>>());
 

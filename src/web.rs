@@ -9,7 +9,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use crate::data::Save;
-use crate::game::{Action, Controls, Cue, Game, STEP};
+use crate::game::{Action, Controls, Game, STEP};
 use crate::gfx::Renderer;
 use crate::math::Vec3;
 use crate::mesh::Mesh;
@@ -117,7 +117,6 @@ struct AudioBridge {
     obj: JsValue,
     sfx: Option<js_sys::Function>,
     ambience: Option<js_sys::Function>,
-    sense: Option<js_sys::Function>,
 }
 
 impl AudioBridge {
@@ -130,20 +129,7 @@ impl AudioBridge {
         };
         let sfx = get("sfx");
         let ambience = get("ambience");
-        let sense = get("sense");
-        AudioBridge { obj, sfx, ambience, sense }
-    }
-
-    /// A soft "a spirit is near" chime: how close, which side, which species, never befriended yet?
-    fn play_cue(&self, c: &Cue) {
-        if let Some(f) = &self.sense {
-            let args = js_sys::Array::new();
-            args.push(&JsValue::from_f64(c.near as f64));
-            args.push(&JsValue::from_f64(c.pan as f64));
-            args.push(&JsValue::from_f64(c.note as f64));
-            args.push(&JsValue::from_bool(c.fresh));
-            let _ = f.apply(&self.obj, &args);
-        }
+        AudioBridge { obj, sfx, ambience }
     }
 
     fn play(&self, name: &str) {
@@ -422,9 +408,6 @@ async fn run() -> Result<(), String> {
         // Sound: one-shot events every frame, world mood a few times a second.
         for s in game.sfx.drain(..) {
             audio_bridge.play(s.name());
-        }
-        for c in game.cues.drain(..) {
-            audio_bridge.play_cue(&c);
         }
         if frame_no % 6 == 1 {
             audio_bridge.set_ambience(&audio::ambience(&game));

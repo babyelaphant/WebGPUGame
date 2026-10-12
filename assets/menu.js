@@ -16,7 +16,7 @@
   const SPEC = {
     master: [10, 0, 10], music: [10, 0, 10], sfx: [10, 0, 10], ambience: [10, 0, 10],
     brightness: [10, 5, 15], ui_scale: [1, 0, 2], pixel: [1, 0, 2], weather_fx: [2, 0, 2],
-    vignette: [1, 0, 1], hints: [1, 0, 1], chimes: [1, 0, 1], shimmer: [1, 0, 1], fps: [0, 0, 1], run_toggle: [0, 0, 1],
+    vignette: [1, 0, 1], hints: [1, 0, 1], shimmer: [1, 0, 1], fps: [0, 0, 1], run_toggle: [0, 0, 1],
   };
   const KEYS = Object.keys(SPEC);
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
@@ -110,7 +110,6 @@
         { key: 'sfx', label: 'Sound effects', type: 'slider' },
         { key: 'ambience', label: 'Ambience (wind, rain, crickets)', type: 'slider' },
         { label: 'Sound', type: 'toggle', get: soundOn, set: setSound, on: 'On', off: 'Muted' },
-        { key: 'chimes', label: 'Spirit chimes', note: 'A soft chime when a spirit is nearby', type: 'toggle' },
       ],
     },
     {

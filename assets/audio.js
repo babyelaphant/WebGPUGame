@@ -258,26 +258,6 @@
         setTarget(musicVol.gain, vol.music, 0.05);
         setTarget(ambBus.gain, AMB_BASE * vol.ambience, 0.05);
       },
-      // A spirit is close. near: 0..1 (1 = right here), pan: -1..1 (left/right of you), note: which
-      // spirit (each species has its own pitch, so you can learn them by ear), fresh: never befriended.
-      sense(near, pan, note, fresh) {
-        const SCALE = [79, 81, 84, 86, 88, 91, 93, 96];
-        const n = Math.max(0, Math.floor(note || 0));
-        const f = mtof(SCALE[n % SCALE.length]);
-        const level = (0.035 + 0.075 * Math.max(0, Math.min(1, near || 0))) * (fresh ? 1 : 0.55);
-        const t = ctx.currentTime + 0.01;
-        let dest = sfxBus;
-        if (ctx.createStereoPanner) {
-          const p = ctx.createStereoPanner();
-          p.pan.value = Math.max(-1, Math.min(1, pan || 0));
-          p.connect(sfxBus);
-          dest = p;
-        }
-        // Two quick glints a fifth apart, like a wind chime brushed once.
-        bell(f, t, level, 1.3, dest);
-        bell(f * 1.5, t + 0.11, level * 0.7, 1.1, dest);
-        if (fresh) bell(f * 2, t + 0.24, level * 0.45, 1.0, dest);
-      },
       setMuted(m) {
         muted = !!m;
         try { window.localStorage.setItem('sc-muted', muted ? '1' : '0'); } catch (e) { /* ignore */ }

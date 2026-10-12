@@ -85,7 +85,7 @@ mod tests {
         ];
         let js = include_str!("../assets/audio.js");
         // The parameterised calls the browser layer makes besides plain Sfx names.
-        for api in ["sense(", "setVolumes("] {
+        for api in ["setVolumes("] {
             assert!(js.contains(api), "assets/audio.js has no {api}");
         }
         let mut seen = std::collections::HashSet::new();

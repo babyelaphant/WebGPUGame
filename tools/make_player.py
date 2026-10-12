@@ -45,10 +45,10 @@ class Group:
                   [P(0,0,1),P(1,0,1),P(1,1,1),P(0,1,1)], [P(0,0,0),P(0,1,0),P(1,1,0),P(1,0,0)]):
             self.quad(*f, c, color)
 
-    def frustum(self, base, r0, r1, h, seg, color):
+    def frustum(self, base, r0, r1, h, seg, color, rot0=0.0):
         center = (base[0], base[1]+h/2, base[2]); top = (base[0], base[1]+h, base[2])
         for i in range(seg):
-            a0, a1 = TAU*i/seg, TAU*(i+1)/seg
+            a0, a1 = TAU*i/seg + rot0, TAU*(i+1)/seg + rot0
             b0 = (base[0]+r0*math.cos(a0), base[1], base[2]+r0*math.sin(a0))
             b1 = (base[0]+r0*math.cos(a1), base[1], base[2]+r0*math.sin(a1))
             t0 = (top[0]+r1*math.cos(a0), top[1], top[2]+r1*math.sin(a0))
@@ -56,11 +56,11 @@ class Group:
             self.quad(b0, b1, t1, t0, center, color)
             self.tri(top, t0, t1, center, color)
 
-    def cone_to(self, base, r, tip, seg, color):
+    def cone_to(self, base, r, tip, seg, color, rot0=0.0):
         """A cone whose point can lean: base circle (flat) at `base`, point at `tip`."""
         center = ((base[0]+tip[0])/2, (base[1]+tip[1])/2, (base[2]+tip[2])/2)
         for i in range(seg):
-            a0, a1 = TAU*i/seg, TAU*(i+1)/seg
+            a0, a1 = TAU*i/seg + rot0, TAU*(i+1)/seg + rot0
             b0 = (base[0]+r*math.cos(a0), base[1], base[2]+r*math.sin(a0))
             b1 = (base[0]+r*math.cos(a1), base[1], base[2]+r*math.sin(a1))
             self.tri(b0, b1, tip, center, color)

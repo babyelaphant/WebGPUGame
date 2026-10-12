@@ -17,10 +17,12 @@ pub struct PartXf {
     pub rot: [f32; 3],
     pub scale: [f32; 3],
     pub offset: [f32; 3],
+    /// Multiplies the part's vertex colours (used for leaves, rock tones, berries...).
+    pub tint: Option<[f32; 3]>,
 }
 
 impl PartXf {
-    pub const IDENT: PartXf = PartXf { rot: [0.0; 3], scale: [1.0; 3], offset: [0.0; 3] };
+    pub const IDENT: PartXf = PartXf { rot: [0.0; 3], scale: [1.0; 3], offset: [0.0; 3], tint: None };
 }
 
 pub struct Mesh {
@@ -97,7 +99,20 @@ impl Mesh {
             let p = self.xp(local);
             let n = rot([v[3], v[4], v[5]]);
             let n = Vec3::new(n[0] * self.cos + n[2] * self.sin, n[1], -n[0] * self.sin + n[2] * self.cos);
-            self.data.extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z, v[6], v[7], v[8], v[9]]);
+            let c = match xf.tint {
+                Some(k) => [v[6] * k[0], v[7] * k[1], v[8] * k[2]],
+                None => [v[6], v[7], v[8]],
+            };
+            self.data.extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z, c[0], c[1], c[2], v[9]]);
+        }
+    }
+
+    /// Adds a whole model (every part, standing still). Parts whose name starts with `tint` are
+    /// multiplied by `tint` when one is given: that is how one tree model gets many leaf colours.
+    pub fn add_model_tinted(&mut self, model: &crate::gltf::Model, tint: Option<[f32; 3]>) {
+        for part in &model.parts {
+            let xf = PartXf { tint: if part.name.starts_with("tint") { tint } else { None }, ..PartXf::IDENT };
+            self.add_part(part, &xf);
         }
     }
 
